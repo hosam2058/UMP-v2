@@ -1,0 +1,86 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+paths:
+  /v1/instruments/{symbol}:
+    get:
+      operationId: getInstrument
+      tags: [instruments]
+      parameters:
+        - in: path
+          name: symbol
+          required: true
+          schema: { type: string }
+      responses:
+        "503": { $ref: "#/components/responses/DataUnavailable" }
+  /v1/instruments/{symbol}/filings:
+    get:
+      operationId: getInstrumentFilings
+      tags: [instruments]
+      parameters:
+        - in: path
+          name: symbol
+          required: true
+          schema: { type: string }
+      responses:
+        "503": { $ref: "#/components/responses/DataUnavailable" }
+  /v1/instruments/{symbol}/fundamentals:
+    get:
+      operationId: getInstrumentFundamentals
+      tags: [instruments]
+      parameters:
+        - in: path
+          name: symbol
+          required: true
+          schema: { type: string }
+      responses:
+        "503": { $ref: "#/components/responses/DataUnavailable" }
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+components:
+  responses:
+    DataUnavailable:
+      description: Requested real data is unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/DataUnavailable"
+  schemas:
+    DataUnavailable:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, enum: [DATA_UNAVAILABLE] }
+            message: { type: string }
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+

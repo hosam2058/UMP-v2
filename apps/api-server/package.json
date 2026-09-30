@@ -1,0 +1,30 @@
+{
+  "name": "@ump/api-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/providers/sec-edgar.test.ts",
+    "build": "node ./build.mjs",
+    "start": "node --enable-source-maps ./dist/index.mjs"
+  },
+  "dependencies": {
+    "@ump/api-zod": "workspace:*",
+    "cors": "2.8.6",
+    "express": "5.2.1",
+    "pino": "9.14.0",
+    "pino-http": "10.5.0"
+  },
+  "devDependencies": {
+    "@types/cors": "2.8.19",
+    "@types/express": "5.0.6",
+    "@types/node": "25.9.4",
+    "esbuild": "0.27.3",
+    "esbuild-plugin-pino": "2.3.3",
+    "pino-pretty": "13.1.3",
+    "thread-stream": "3.1.0",
+    "tsx": "4.23.0"
+  }
+}

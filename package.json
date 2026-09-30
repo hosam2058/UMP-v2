@@ -1,0 +1,24 @@
+{
+  "name": "@ump/workspace",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=24 <27",
+    "pnpm": "10.33.0"
+  },
+  "scripts": {
+    "typecheck": "pnpm --filter @ump/api-zod run typecheck && pnpm --filter @ump/db run typecheck && pnpm --filter @ump/api-server run typecheck",
+    "test": "pnpm --filter @ump/api-server run test",
+    "codegen": "pnpm --filter @ump/api-spec run codegen",
+    "codegen:check": "pnpm run codegen && git diff --exit-code -- packages/api-zod/src/generated",
+    "format": "pnpm exec prettier --write .",
+    "format:check": "pnpm exec prettier --check .",
+    "build": "pnpm --filter @ump/api-server run build",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run format:check"
+  },
+  "devDependencies": {
+    "prettier": "3.9.4",
+    "typescript": "5.9.3"
+  }
+}

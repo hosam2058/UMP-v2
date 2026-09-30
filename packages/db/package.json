@@ -1,0 +1,24 @@
+{
+  "name": "@ump/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -b tsconfig.json"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2",
+    "drizzle-zod": "0.8.3",
+    "pg": "8.22.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "25.9.4",
+    "@types/pg": "8.20.0",
+    "drizzle-kit": "0.31.10"
+  }
+}
