@@ -6,6 +6,10 @@ export interface UmpConfig {
   marketDataProvider: "none";
 }
 
+export interface PersistenceConfig {
+  databaseUrl: string;
+}
+
 const optional = (value: string | undefined): string | undefined => value?.trim() || undefined;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): UmpConfig {
@@ -19,4 +23,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): UmpConfig {
     );
   }
   return { databaseUrl: optional(env.DATABASE_URL), secUserAgent: optional(env.SEC_USER_AGENT), marketDataProvider: "none" };
+}
+
+/** Requires persistence configuration only at an explicit composition boundary. */
+export function requirePersistenceConfig(config: UmpConfig): PersistenceConfig {
+  if (!config.databaseUrl) {
+    throw new ProviderError(
+      "CONFIGURATION",
+      "DATABASE_URL is required when persistence is enabled.",
+      "configuration",
+      false,
+    );
+  }
+
+  return { databaseUrl: config.databaseUrl };
 }

@@ -4,13 +4,25 @@ import * as schema from "./schema";
 
 const { Pool } = pg;
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
-  );
+export interface DatabaseConnectionConfig {
+  connectionString: string;
+  pool?: Omit<pg.PoolConfig, "connectionString">;
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle(pool, { schema });
+/**
+ * Creates an independently owned database pool and Drizzle handle. Callers
+ * must validate connection configuration before invoking this boundary and
+ * must call close during their shutdown lifecycle.
+ */
+export function createDatabase(config: DatabaseConnectionConfig) {
+  const pool = new Pool({ ...config.pool, connectionString: config.connectionString });
+  const db = drizzle(pool, { schema });
+
+  return {
+    db,
+    pool,
+    close: () => pool.end(),
+  };
+}
 
 export * from "./schema";
