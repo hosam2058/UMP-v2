@@ -26,3 +26,4 @@ export function createDatabase(config: DatabaseConnectionConfig) {
 }
 
 export * from "./schema";
+export * from "./repositories";
