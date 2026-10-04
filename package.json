@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "pnpm --filter @ump/api-zod run typecheck && pnpm --filter @ump/db run typecheck && pnpm --filter @ump/api-server run typecheck",
-    "test": "pnpm --filter @ump/api-server run test",
+    "test": "pnpm --filter @ump/api-server run test && pnpm --dir apps/api-server exec tsx --test ../../packages/db/src/index.test.ts ../../packages/db/src/repositories.test.ts",
     "codegen": "pnpm --filter @ump/api-spec run codegen",
     "codegen:check": "pnpm run codegen && git diff --exit-code -- packages/api-zod/src/generated",
     "format": "pnpm exec prettier --write .",
