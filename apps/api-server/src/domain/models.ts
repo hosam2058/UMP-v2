@@ -6,7 +6,9 @@ export type DecimalString = string;
 
 /** Internal database UUIDs are never provider identifiers. */
 declare const internalUuidBrand: unique symbol;
-export type InternalUuid = string & { readonly [internalUuidBrand]: "InternalUuid" };
+export type InternalUuid = string & {
+  readonly [internalUuidBrand]: "InternalUuid";
+};
 
 /** Identifies a record in an external provider namespace. */
 export interface ExternalIdentifier {
@@ -82,10 +84,14 @@ export interface ExternalFundamentalFact {
   tag: string;
   value: DecimalString;
   unit: string;
+  form: string;
+  filingDate: string;
+  accessionNumber: string;
+  reportingStart: string | null;
+  reportingEnd: string;
   fiscalYear: number | null;
   fiscalPeriod: string | null;
-  filingDate: string | null;
-  accessionNumber: string | null;
+  frame: string | null;
 }
 
 export interface SecFiling {
