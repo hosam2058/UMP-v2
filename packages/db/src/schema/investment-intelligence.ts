@@ -109,7 +109,7 @@ export const fundamentalFacts = pgTable(
     companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
     taxonomy: varchar("taxonomy", { length: 128 }).notNull(),
     tag: varchar("tag", { length: 255 }).notNull(),
-    value: numeric("value", { precision: 30, scale: 10 }).notNull(),
+    value: numeric("value").notNull(),
     unit: varchar("unit", { length: 64 }).notNull(),
     fiscalYear: integer("fiscal_year"),
     fiscalPeriod: varchar("fiscal_period", { length: 16 }),

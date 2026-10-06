@@ -28,6 +28,27 @@ interface RecentFilings {
   primaryDocument?: string[];
 }
 
+const EXACT_JSON_NUMBER = Symbol("exact-json-number");
+
+interface ExactJsonNumber {
+  readonly [EXACT_JSON_NUMBER]: true;
+  readonly source: string;
+}
+
+interface JsonParseContext {
+  readonly source?: string;
+}
+
+type JsonParseWithSource = (
+  text: string,
+  reviver?: (
+    this: unknown,
+    key: string,
+    value: unknown,
+    context: JsonParseContext,
+  ) => unknown,
+) => unknown;
+
 function invalidResponse(message: string, cause?: unknown): never {
   throw new ProviderError(
     "INVALID_RESPONSE",
@@ -35,6 +56,39 @@ function invalidResponse(message: string, cause?: unknown): never {
     "sec-edgar",
     false,
     cause,
+  );
+}
+
+function parseSecJson(text: string): unknown {
+  const parseWithSource = JSON.parse as JsonParseWithSource;
+
+  return parseWithSource(text, (key, value, context) => {
+    if (key !== "val" || typeof value !== "number") return value;
+
+    if (typeof context?.source !== "string") {
+      throw new Error(
+        "JSON parser did not expose the original numeric source.",
+      );
+    }
+
+    return {
+      [EXACT_JSON_NUMBER]: true,
+      source: context.source,
+    };
+  });
+}
+
+function isExactJsonNumber(value: unknown): value is ExactJsonNumber {
+  if (typeof value !== "object" || value === null) return false;
+
+  const candidate = value as {
+    [EXACT_JSON_NUMBER]?: unknown;
+    source?: unknown;
+  };
+
+  return (
+    candidate[EXACT_JSON_NUMBER] === true &&
+    typeof candidate.source === "string"
   );
 }
 
@@ -298,8 +352,8 @@ function mapCompanyFacts(
           const context = `SEC companyfacts ${taxonomy}.${tag}.${unit}[${index}]`;
           const fact = requireRecord(rawValues[index], context);
           const rawValue = fact.val;
-          if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
-            invalidResponse(`${context}.val must be a finite number.`);
+          if (!isExactJsonNumber(rawValue)) {
+            invalidResponse(`${context}.val must be a finite JSON number.`);
           }
 
           mapped.push({
@@ -307,7 +361,7 @@ function mapCompanyFacts(
             taxonomy,
             tag,
             unit,
-            value: String(rawValue),
+            value: rawValue.source,
             form: requireNonEmptyString(fact.form, `${context}.form`),
             filingDate: requireDateOnlyString(fact.filed, `${context}.filed`),
             accessionNumber: requireSecAccessionNumber(
@@ -349,8 +403,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 export function normalizeCik(cik: string): string {
-  const digits = cik.replace(/\D/g, "");
-  if (!digits || digits.length > 10) {
+  if (!/^\d{1,10}$/.test(cik)) {
     throw new ProviderError(
       "INVALID_RESPONSE",
       "CIK must contain one to ten digits.",
@@ -358,7 +411,7 @@ export function normalizeCik(cik: string): string {
       false,
     );
   }
-  return digits.padStart(10, "0");
+  return cik.padStart(10, "0");
 }
 
 export class SecEdgarProvider implements FundamentalsProvider, FilingsProvider {
@@ -518,7 +571,7 @@ export class SecEdgarProvider implements FundamentalsProvider, FilingsProvider {
         if (res.ok) {
           let data: unknown;
           try {
-            data = await res.json();
+            data = parseSecJson(await res.text());
           } catch (error) {
             if (isAbortError(error)) throw error;
             throw new ProviderError(

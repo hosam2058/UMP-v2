@@ -356,6 +356,32 @@ test("same fact value and sourceAsOf is duplicate even with newer fetchedAt", as
   );
 });
 
+test("numerically equivalent fact values are duplicates", async () => {
+  const existing = {
+    ...fact,
+    id: "fact-1",
+    value: "123.4500000000",
+  };
+
+  const fake = fakeDatabase({
+    insertResults: [[]],
+    selectRows: [[existing]],
+  });
+
+  const result = await createRepositories(
+    fake.database as never,
+  ).fundamentalFacts.persist({
+    ...fact,
+    value: "1.2345e2",
+  });
+
+  assert.deepEqual(result, { status: "duplicate" });
+  assert.equal(
+    fake.calls.some((call) => call.operation === "update"),
+    false,
+  );
+});
+
 test("same fact identity with corrected value updates approved fields", async () => {
   const existing = {
     ...fact,

@@ -68,7 +68,12 @@ async function expectInvalidResponse(
 
 test("normalizes SEC CIK values", () => {
   assert.equal(normalizeCik("320193"), "0000320193");
+  assert.equal(normalizeCik("0000320193"), "0000320193");
   assert.throws(() => normalizeCik("not-a-cik"));
+  assert.throws(() => normalizeCik("32x0193"));
+  assert.throws(() => normalizeCik(" 320193 "));
+  assert.throws(() => normalizeCik("+320193"));
+  assert.throws(() => normalizeCik("12345678901"));
 });
 
 test("validates SEC response CIK identity for submissions and companyfacts", async () => {
@@ -334,6 +339,16 @@ test("maps a complete companyfacts context and retains provenance", async () => 
   );
 });
 
+test("preserves exact companyfacts numeric values beyond JavaScript safe integers", async () => {
+  const body = JSON.stringify(
+    companyFactsPayload({ ...validFact, val: 0 }),
+  ).replace('"val":0', '"val":9007199254740993');
+
+  const result = await providerForText(body).getCompanyFactsByCik("320193");
+
+  assert.equal(result.data[0]?.value, "9007199254740993");
+});
+
 test("accepts zero and nullable companyfacts context without inventing dates", async () => {
   const fact: Record<string, unknown> = {
     ...validFact,
@@ -399,19 +414,22 @@ test("rejects malformed companyfacts accession numbers", async () => {
   }
 });
 
-test("rejects invalid companyfacts value types and non-finite values", async () => {
+test("rejects non-numeric companyfacts values", async () => {
   await expectInvalidResponse(
     providerForPayload(
       companyFactsPayload({ ...validFact, val: "123.45" }),
     ).getCompanyFactsByCik("320193"),
   );
+});
 
-  const nonFiniteJson = JSON.stringify(
+test("preserves valid JSON numbers beyond JavaScript numeric range", async () => {
+  const body = JSON.stringify(
     companyFactsPayload({ ...validFact, val: 0 }),
   ).replace('"val":0', '"val":1e999');
-  await expectInvalidResponse(
-    providerForText(nonFiniteJson).getCompanyFactsByCik("320193"),
-  );
+
+  const result = await providerForText(body).getCompanyFactsByCik("320193");
+
+  assert.equal(result.data[0]?.value, "1e999");
 });
 
 test("rejects malformed companyfacts unit containers", async () => {

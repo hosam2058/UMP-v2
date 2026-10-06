@@ -146,6 +146,44 @@ function sameValue(left: unknown, right: unknown): boolean {
     ? left.getTime() === right.getTime()
     : left === right;
 }
+
+const DECIMAL_NUMBER_PATTERN =
+  /^(-?)(0|[1-9]\d*)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/;
+
+function canonicalDecimal(value: string): string | null {
+  const match = DECIMAL_NUMBER_PATTERN.exec(value);
+  if (!match) return null;
+
+  const negative = match[1] === "-";
+  const integer = match[2] ?? "";
+  const fraction = match[3] ?? "";
+  const explicitExponent = match[4] ?? "0";
+
+  let digits = `${integer}${fraction}`.replace(/^0+/, "");
+  if (digits.length === 0) return "0";
+
+  let trailingZeros = 0;
+  while (digits.endsWith("0")) {
+    digits = digits.slice(0, -1);
+    trailingZeros += 1;
+  }
+
+  const exponent =
+    BigInt(explicitExponent) - BigInt(fraction.length) + BigInt(trailingZeros);
+
+  return `${negative ? "-" : ""}${digits}e${exponent}`;
+}
+
+function sameNumericValue(left: string, right: string): boolean {
+  const canonicalLeft = canonicalDecimal(left);
+  const canonicalRight = canonicalDecimal(right);
+
+  if (canonicalLeft === null || canonicalRight === null) {
+    return left === right;
+  }
+
+  return canonicalLeft === canonicalRight;
+}
 function sameDataSource(
   existing: typeof dataSources.$inferSelect,
   input: DataSourceInput,
@@ -173,7 +211,7 @@ function sameFactCanonicalValue(
   input: FundamentalFactInput,
 ): boolean {
   return (
-    existing.value === input.value &&
+    sameNumericValue(existing.value, input.value) &&
     sameValue(existing.sourceAsOf, input.sourceAsOf)
   );
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "fundamental_facts" ALTER COLUMN "value" SET DATA TYPE numeric;
