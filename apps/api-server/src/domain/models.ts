@@ -24,7 +24,6 @@ export interface Instrument {
   exchange: string | null;
   currency: string;
   country: string | null;
-  cik: string | null;
   active: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -64,7 +63,7 @@ export interface PriceBar {
 }
 
 export interface FundamentalFact {
-  instrumentId: InternalUuid;
+  companyId: InternalUuid;
   taxonomy: string;
   tag: string;
   value: DecimalString;
@@ -95,8 +94,7 @@ export interface ExternalFundamentalFact {
 }
 
 export interface SecFiling {
-  instrumentId: InternalUuid;
-  cik: string;
+  companyId: InternalUuid;
   form: string;
   accessionNumber: string;
   filingDate: string;

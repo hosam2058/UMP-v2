@@ -1,6 +1,12 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { createDatabase } from "./index";
-import { companies, dataSources, fundamentalFacts, secFilings } from "./schema";
+import {
+  companies,
+  dataSources,
+  fundamentalFacts,
+  ingestionRecords,
+  secFilings,
+} from "./schema";
 
 type DatabaseHandle = ReturnType<typeof createDatabase>["db"];
 type RepositoryDatabaseHandle = Pick<
@@ -14,6 +20,41 @@ export interface DataSourceInput {
   baseUrl: string | null;
   isDelayed: boolean;
 }
+
+export type DataSourcePersistResult =
+  | { status: "inserted"; id: string }
+  | { status: "duplicate"; id: string }
+  | {
+      status: "conflict";
+      conflict: "data-source-metadata";
+    };
+
+export interface IngestionRecordStartInput {
+  sourceId: string;
+  resourceType: string;
+  resourceKey: string;
+  startedAt: Date;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface IngestionRecordCompleteInput {
+  id: string;
+  completedAt: Date;
+  sourceAsOf: Date | null;
+  fetchedAt: Date | null;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface IngestionRecordFailInput {
+  id: string;
+  completedAt: Date;
+  sourceAsOf: Date | null;
+  fetchedAt: Date | null;
+  errorCode: string;
+  errorMessage: string;
+  metadata: Record<string, unknown> | null;
+}
+
 export interface SecFilingInput {
   companyId: string;
   sourceId: string;
@@ -74,7 +115,7 @@ export interface FundamentalFactCorrection {
 }
 export interface Repositories {
   dataSources: {
-    persist(input: DataSourceInput): Promise<RepositoryWriteResult>;
+    persist(input: DataSourceInput): Promise<DataSourcePersistResult>;
   };
   companies: {
     findExistingByCik(
@@ -86,6 +127,17 @@ export interface Repositories {
   };
   fundamentalFacts: {
     persist(input: FundamentalFactInput): Promise<RepositoryWriteResult>;
+  };
+  ingestionRecords: {
+    start(
+      input: IngestionRecordStartInput,
+    ): Promise<{ status: "started"; id: string }>;
+    complete(
+      input: IngestionRecordCompleteInput,
+    ): Promise<{ status: "completed"; id: string }>;
+    fail(
+      input: IngestionRecordFailInput,
+    ): Promise<{ status: "failed"; id: string }>;
   };
   withTransaction<T>(
     operation: (repositories: Repositories) => Promise<T>,
@@ -230,7 +282,10 @@ export function createRepositories(
           })
           .returning({ id: dataSources.id });
 
-        if (inserted.length > 0) return { status: "inserted" };
+        const insertedRow = inserted[0];
+        if (insertedRow) {
+          return { status: "inserted", id: insertedRow.id };
+        }
 
         const existing = (
           await database
@@ -252,7 +307,7 @@ export function createRepositories(
         }
 
         return sameDataSource(existing, input)
-          ? { status: "duplicate" }
+          ? { status: "duplicate", id: existing.id }
           : { status: "conflict", conflict: "data-source-metadata" };
       },
     },
@@ -389,6 +444,94 @@ export function createRepositories(
         return { status: "updated" };
       },
     },
+    ingestionRecords: {
+      async start(input) {
+        const started = await database
+          .insert(ingestionRecords)
+          .values({
+            sourceId: input.sourceId,
+            resourceType: input.resourceType,
+            resourceKey: input.resourceKey,
+            status: "started",
+            startedAt: input.startedAt,
+            completedAt: null,
+            sourceAsOf: null,
+            fetchedAt: null,
+            errorCode: null,
+            errorMessage: null,
+            metadata: input.metadata,
+          })
+          .returning({ id: ingestionRecords.id });
+
+        const startedRow = started[0];
+        if (!startedRow) {
+          throw new Error("Ingestion record insert did not return an id");
+        }
+
+        return { status: "started", id: startedRow.id };
+      },
+
+      async complete(input) {
+        const completed = await database
+          .update(ingestionRecords)
+          .set({
+            status: "completed",
+            completedAt: input.completedAt,
+            sourceAsOf: input.sourceAsOf,
+            fetchedAt: input.fetchedAt,
+            errorCode: null,
+            errorMessage: null,
+            metadata: input.metadata,
+          })
+          .where(
+            and(
+              eq(ingestionRecords.id, input.id),
+              eq(ingestionRecords.status, "started"),
+            ),
+          )
+          .returning({ id: ingestionRecords.id });
+
+        const completedRow = completed[0];
+        if (!completedRow) {
+          throw new Error(
+            "Ingestion record must exist and be started before completion",
+          );
+        }
+
+        return { status: "completed", id: completedRow.id };
+      },
+
+      async fail(input) {
+        const failed = await database
+          .update(ingestionRecords)
+          .set({
+            status: "failed",
+            completedAt: input.completedAt,
+            sourceAsOf: input.sourceAsOf,
+            fetchedAt: input.fetchedAt,
+            errorCode: input.errorCode,
+            errorMessage: input.errorMessage,
+            metadata: input.metadata,
+          })
+          .where(
+            and(
+              eq(ingestionRecords.id, input.id),
+              eq(ingestionRecords.status, "started"),
+            ),
+          )
+          .returning({ id: ingestionRecords.id });
+
+        const failedRow = failed[0];
+        if (!failedRow) {
+          throw new Error(
+            "Ingestion record must exist and be started before failure",
+          );
+        }
+
+        return { status: "failed", id: failedRow.id };
+      },
+    },
+
     withTransaction(operation) {
       return database.transaction((transaction) =>
         operation(createRepositories(transaction)),

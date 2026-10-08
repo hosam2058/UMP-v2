@@ -51,6 +51,7 @@ const source: DataSourceInput = {
 interface FakeConfig {
   selectRows?: unknown[][];
   insertResults?: unknown[][];
+  updateResults?: unknown[][];
   transactionDatabase?: ReturnType<typeof fakeDatabase>["database"];
   label?: string;
 }
@@ -64,6 +65,7 @@ function fakeDatabase(config: FakeConfig = {}) {
 
   const selectRows = [...(config.selectRows ?? [])];
   const insertResults = [...(config.insertResults ?? [])];
+  const updateResults = [...(config.updateResults ?? [])];
 
   const database = {
     select: () => ({
@@ -81,21 +83,29 @@ function fakeDatabase(config: FakeConfig = {}) {
       values: (value: unknown) => {
         calls.push({ operation: "insert", value, label: config.label });
 
+        const returning = async () => {
+          calls.push({ operation: "returning", label: config.label });
+          return insertResults.shift() ?? [];
+        };
+
         return {
-          onConflictDoNothing: () => ({
-            returning: async () => {
-              calls.push({ operation: "returning", label: config.label });
-              return insertResults.shift() ?? [];
-            },
-          }),
+          returning,
+          onConflictDoNothing: () => ({ returning }),
         };
       },
     }),
 
     update: () => ({
       set: (value: unknown) => ({
-        where: async () => {
+        where: () => {
           calls.push({ operation: "update", value, label: config.label });
+
+          return {
+            returning: async () => {
+              calls.push({ operation: "returning", label: config.label });
+              return updateResults.shift() ?? [];
+            },
+          };
         },
       }),
     }),
@@ -148,7 +158,7 @@ test("data source insert reports inserted", async () => {
     fake.database as never,
   ).dataSources.persist(source);
 
-  assert.deepEqual(result, { status: "inserted" });
+  assert.deepEqual(result, { status: "inserted", id: "source-1" });
   assert.deepEqual(
     fake.calls.map((call) => call.operation),
     ["insert", "returning"],
@@ -172,7 +182,7 @@ test("data source exact duplicate is a no-op", async () => {
     fake.database as never,
   ).dataSources.persist(source);
 
-  assert.deepEqual(result, { status: "duplicate" });
+  assert.deepEqual(result, { status: "duplicate", id: "source-1" });
 });
 
 test("data source changed metadata conflicts", async () => {
@@ -204,6 +214,142 @@ test("data source changed metadata conflicts", async () => {
       },
     );
   }
+});
+
+test("ingestion record starts with an auditable started state", async () => {
+  const startedAt = new Date("2026-10-08T06:00:00.000Z");
+  const fake = fakeDatabase({
+    insertResults: [[{ id: "ingestion-1" }]],
+  });
+
+  const result = await createRepositories(
+    fake.database as never,
+  ).ingestionRecords.start({
+    sourceId: "source-1",
+    resourceType: "sec-company-snapshot",
+    resourceKey: "0000320193",
+    startedAt,
+    metadata: { scope: "company" },
+  });
+
+  assert.deepEqual(result, {
+    status: "started",
+    id: "ingestion-1",
+  });
+
+  assert.deepEqual(fake.calls[0]?.value, {
+    sourceId: "source-1",
+    resourceType: "sec-company-snapshot",
+    resourceKey: "0000320193",
+    status: "started",
+    startedAt,
+    completedAt: null,
+    sourceAsOf: null,
+    fetchedAt: null,
+    errorCode: null,
+    errorMessage: null,
+    metadata: { scope: "company" },
+  });
+});
+
+test("started ingestion record can complete", async () => {
+  const completedAt = new Date("2026-10-08T06:01:00.000Z");
+  const fetchedAt = new Date("2026-10-08T06:00:30.000Z");
+
+  const fake = fakeDatabase({
+    updateResults: [[{ id: "ingestion-1" }]],
+  });
+
+  const result = await createRepositories(
+    fake.database as never,
+  ).ingestionRecords.complete({
+    id: "ingestion-1",
+    completedAt,
+    sourceAsOf: null,
+    fetchedAt,
+    metadata: { facts: 10, filings: 2 },
+  });
+
+  assert.deepEqual(result, {
+    status: "completed",
+    id: "ingestion-1",
+  });
+
+  assert.deepEqual(fake.calls[0]?.value, {
+    status: "completed",
+    completedAt,
+    sourceAsOf: null,
+    fetchedAt,
+    errorCode: null,
+    errorMessage: null,
+    metadata: { facts: 10, filings: 2 },
+  });
+});
+
+test("started ingestion record can fail with audit details", async () => {
+  const completedAt = new Date("2026-10-08T06:01:00.000Z");
+
+  const fake = fakeDatabase({
+    updateResults: [[{ id: "ingestion-1" }]],
+  });
+
+  const result = await createRepositories(
+    fake.database as never,
+  ).ingestionRecords.fail({
+    id: "ingestion-1",
+    completedAt,
+    sourceAsOf: null,
+    fetchedAt: null,
+    errorCode: "COMPANY_NOT_FOUND",
+    errorMessage: "Existing company was not found for SEC CIK.",
+    metadata: { cik: "0000320193" },
+  });
+
+  assert.deepEqual(result, {
+    status: "failed",
+    id: "ingestion-1",
+  });
+
+  assert.deepEqual(fake.calls[0]?.value, {
+    status: "failed",
+    completedAt,
+    sourceAsOf: null,
+    fetchedAt: null,
+    errorCode: "COMPANY_NOT_FOUND",
+    errorMessage: "Existing company was not found for SEC CIK.",
+    metadata: { cik: "0000320193" },
+  });
+});
+
+test("terminal ingestion transition rejects a non-started record", async () => {
+  const repositories = createRepositories(fakeDatabase().database as never);
+  const completedAt = new Date("2026-10-08T06:01:00.000Z");
+
+  await assert.rejects(
+    () =>
+      repositories.ingestionRecords.complete({
+        id: "ingestion-1",
+        completedAt,
+        sourceAsOf: null,
+        fetchedAt: null,
+        metadata: null,
+      }),
+    /must exist and be started before completion/,
+  );
+
+  await assert.rejects(
+    () =>
+      repositories.ingestionRecords.fail({
+        id: "ingestion-1",
+        completedAt,
+        sourceAsOf: null,
+        fetchedAt: null,
+        errorCode: "TEST_FAILURE",
+        errorMessage: "failure",
+        metadata: null,
+      }),
+    /must exist and be started before failure/,
+  );
 });
 
 test("filing insert reports inserted", async () => {
@@ -432,7 +578,7 @@ test("transaction-bound repositories execute against transaction handle", async 
     bound.dataSources.persist(source),
   );
 
-  assert.deepEqual(result, { status: "inserted" });
+  assert.deepEqual(result, { status: "inserted", id: "source-1" });
 
   assert.deepEqual(
     outerFake.calls.map((call) => call.operation),
