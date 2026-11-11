@@ -9,6 +9,7 @@
   },
   "include": ["src"],
   "references": [
-    { "path": "../../packages/api-zod" }
+    { "path": "../../packages/api-zod" },
+    { "path": "../../packages/db" }
   ]
 }
