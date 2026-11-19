@@ -15,6 +15,13 @@
       "when": 1791280397971,
       "tag": "0001_unrestrict_fundamental_fact_numeric",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791400000000,
+      "tag": "0002_curated_stock_mapping_ledger",
+      "breakpoints": true
     }
   ]
 }

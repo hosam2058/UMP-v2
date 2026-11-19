@@ -109,7 +109,15 @@ function error(
 }
 
 function identity(revision: CuratedUsStockMappingRevision): string {
-  return `${revision.instrument?.symbol?.trim().toUpperCase() ?? ""}\u0000${revision.instrument?.exchange?.trim().toUpperCase() ?? ""}`;
+  const symbol =
+    typeof revision.instrument?.symbol === "string"
+      ? revision.instrument.symbol.trim().toUpperCase()
+      : "";
+  const exchange =
+    typeof revision.instrument?.exchange === "string"
+      ? revision.instrument.exchange.trim().toUpperCase()
+      : "";
+  return `${symbol}\u0000${exchange}`;
 }
 
 function validateEvidence(
@@ -251,11 +259,13 @@ export function validateCuratedStockMappingRegistry(
           "Registry scope is US-listed USD stocks only.",
         ),
       );
+    const exchange =
+      typeof record?.instrument?.exchange === "string"
+        ? record.instrument.exchange.trim().toUpperCase()
+        : "";
     if (
       !SUPPORTED_US_STOCK_EXCHANGES.includes(
-        record?.instrument?.exchange
-          ?.trim()
-          .toUpperCase() as (typeof SUPPORTED_US_STOCK_EXCHANGES)[number],
+        exchange as (typeof SUPPORTED_US_STOCK_EXCHANGES)[number],
       )
     )
       errors.push(

@@ -49,7 +49,9 @@ export interface ValidatedCuratedSecSupportedStockMapping {
     companyCik: string;
   };
   mappingProvenance: CuratedSecSupportedStockMapping["mappingProvenance"];
-  approval: CuratedSecSupportedStockMapping["approval"] & { status: "approved" };
+  approval: CuratedSecSupportedStockMapping["approval"] & {
+    status: "approved";
+  };
   active: true;
 }
 
@@ -101,7 +103,9 @@ function error(
 function validateOne(
   mapping: CuratedSecSupportedStockMapping,
   index: number,
-): { mapping: ValidatedCuratedSecSupportedStockMapping } | { errors: MappingValidationError[] } {
+):
+  | { mapping: ValidatedCuratedSecSupportedStockMapping }
+  | { errors: MappingValidationError[] } {
   const errors: MappingValidationError[] = [];
   const instrument = mapping?.instrument;
   const company = mapping?.company;
@@ -124,18 +128,37 @@ function validateOne(
     [approval?.approvedAt, "approval timestamp"],
   ];
   for (const [value, field] of requiredFields) {
-    if (!required(value)) errors.push(error(index, "MISSING_REQUIRED_FIELD", `${field} is required.`));
+    if (!required(value))
+      errors.push(
+        error(index, "MISSING_REQUIRED_FIELD", `${field} is required.`),
+      );
   }
   if (errors.length > 0) return { errors };
 
   const symbol = normalizeRequired(instrument.symbol).toUpperCase();
   const exchange = normalizeRequired(instrument.exchange).toUpperCase();
   const currency = normalizeRequired(instrument.currency).toUpperCase();
-  if (!SYMBOL.test(symbol) || !EXCHANGE.test(exchange) || !CURRENCY.test(currency)) {
-    errors.push(error(index, "INVALID_INSTRUMENT_IDENTITY", "Symbol, exchange, and currency must be canonical non-ambiguous identifiers."));
+  if (
+    !SYMBOL.test(symbol) ||
+    !EXCHANGE.test(exchange) ||
+    !CURRENCY.test(currency)
+  ) {
+    errors.push(
+      error(
+        index,
+        "INVALID_INSTRUMENT_IDENTITY",
+        "Symbol, exchange, and currency must be canonical non-ambiguous identifiers.",
+      ),
+    );
   }
   if (normalizeRequired(instrument.assetType).toLowerCase() !== "stock") {
-    errors.push(error(index, "UNSUPPORTED_ASSET_TYPE", "Only stock instruments are supported by the Phase 2 SEC mapping contract."));
+    errors.push(
+      error(
+        index,
+        "UNSUPPORTED_ASSET_TYPE",
+        "Only stock instruments are supported by the Phase 2 SEC mapping contract.",
+      ),
+    );
   }
 
   let cik: string | undefined;
@@ -144,19 +167,52 @@ function validateOne(
     cik = normalizeSecCik(company.cik);
     relationshipCik = normalizeSecCik(relationship.companyCik);
   } catch {
-    errors.push(error(index, "INVALID_CIK", "Company and relationship CIK values must contain one to ten decimal digits."));
+    errors.push(
+      error(
+        index,
+        "INVALID_CIK",
+        "Company and relationship CIK values must contain one to ten decimal digits.",
+      ),
+    );
   }
   if (cik && relationshipCik && cik !== relationshipCik) {
-    errors.push(error(index, "INCONSISTENT_COMPANY_RELATIONSHIP", "Instrument company relationship must reference the same canonical CIK as its company."));
+    errors.push(
+      error(
+        index,
+        "INCONSISTENT_COMPANY_RELATIONSHIP",
+        "Instrument company relationship must reference the same canonical CIK as its company.",
+      ),
+    );
   }
-  if (!validIsoTimestamp(provenance.retrievedAt) || !validIsoTimestamp(approval.approvedAt)) {
-    errors.push(error(index, "MISSING_REQUIRED_FIELD", "Mapping provenance and approval timestamps must be valid dates."));
+  if (
+    !validIsoTimestamp(provenance.retrievedAt) ||
+    !validIsoTimestamp(approval.approvedAt)
+  ) {
+    errors.push(
+      error(
+        index,
+        "MISSING_REQUIRED_FIELD",
+        "Mapping provenance and approval timestamps must be valid dates.",
+      ),
+    );
   }
   if (approval.status !== "approved") {
-    errors.push(error(index, "UNAPPROVED_MAPPING", "Only explicitly approved mappings are eligible for SEC support."));
+    errors.push(
+      error(
+        index,
+        "UNAPPROVED_MAPPING",
+        "Only explicitly approved mappings are eligible for SEC support.",
+      ),
+    );
   }
   if (mapping.active !== true) {
-    errors.push(error(index, "INACTIVE_MAPPING", "Only active mappings are eligible for SEC support."));
+    errors.push(
+      error(
+        index,
+        "INACTIVE_MAPPING",
+        "Only active mappings are eligible for SEC support.",
+      ),
+    );
   }
   if (errors.length > 0 || !cik || !relationshipCik) return { errors };
 
@@ -171,8 +227,16 @@ function validateOne(
       },
       company: { cik, legalName: normalizeRequired(company.legalName) },
       companyRelationship: { companyCik: relationshipCik },
-      mappingProvenance: { ...provenance, source: normalizeRequired(provenance.source), reference: normalizeRequired(provenance.reference) },
-      approval: { ...approval, status: "approved", approvedBy: normalizeRequired(approval.approvedBy) },
+      mappingProvenance: {
+        ...provenance,
+        source: normalizeRequired(provenance.source),
+        reference: normalizeRequired(provenance.reference),
+      },
+      approval: {
+        ...approval,
+        status: "approved",
+        approvedBy: normalizeRequired(approval.approvedBy),
+      },
       active: true,
     },
   };
@@ -183,9 +247,20 @@ export function validateCuratedSecSupportedStockMappings(
   mappings: readonly CuratedSecSupportedStockMapping[],
 ): MappingValidationResult {
   const errors: MappingValidationError[] = [];
+  if (!Array.isArray(mappings)) {
+    return {
+      ok: false,
+      errors: [
+        error(-1, "MISSING_REQUIRED_FIELD", "Mappings must be an array."),
+      ],
+    };
+  }
   const validated: ValidatedCuratedSecSupportedStockMapping[] = [];
   const instrumentIdentities = new Map<string, number>();
-  const companiesByCik = new Map<string, { legalName: string; index: number }>();
+  const companiesByCik = new Map<
+    string,
+    { legalName: string; index: number }
+  >();
 
   mappings.forEach((mapping, index) => {
     const result = validateOne(mapping, index);
@@ -197,14 +272,29 @@ export function validateCuratedSecSupportedStockMappings(
     const identity = `${validatedMapping.instrument.symbol}\u0000${validatedMapping.instrument.exchange}`;
     const priorInstrument = instrumentIdentities.get(identity);
     if (priorInstrument !== undefined) {
-      errors.push(error(index, "DUPLICATE_INSTRUMENT_IDENTITY", `Instrument identity duplicates mapping at index ${priorInstrument}.`));
+      errors.push(
+        error(
+          index,
+          "DUPLICATE_INSTRUMENT_IDENTITY",
+          `Instrument identity duplicates mapping at index ${priorInstrument}.`,
+        ),
+      );
     } else {
       instrumentIdentities.set(identity, index);
     }
 
     const priorCompany = companiesByCik.get(validatedMapping.company.cik);
-    if (priorCompany && priorCompany.legalName !== validatedMapping.company.legalName) {
-      errors.push(error(index, "CONFLICTING_COMPANY_IDENTITY", `Company CIK conflicts with the legal name in mapping at index ${priorCompany.index}.`));
+    if (
+      priorCompany &&
+      priorCompany.legalName !== validatedMapping.company.legalName
+    ) {
+      errors.push(
+        error(
+          index,
+          "CONFLICTING_COMPANY_IDENTITY",
+          `Company CIK conflicts with the legal name in mapping at index ${priorCompany.index}.`,
+        ),
+      );
     } else if (!priorCompany) {
       companiesByCik.set(validatedMapping.company.cik, {
         legalName: validatedMapping.company.legalName,
@@ -214,5 +304,7 @@ export function validateCuratedSecSupportedStockMappings(
     validated.push(validatedMapping);
   });
 
-  return errors.length > 0 ? { ok: false, errors } : { ok: true, mappings: validated };
+  return errors.length > 0
+    ? { ok: false, errors }
+    : { ok: true, mappings: validated };
 }

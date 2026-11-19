@@ -2,9 +2,11 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { createDatabase } from "./index";
 import {
   companies,
+  curatedStockMappingRevisions,
   dataSources,
   fundamentalFacts,
   ingestionRecords,
+  instruments,
   secFilings,
 } from "./schema";
 
@@ -122,6 +124,33 @@ export interface Repositories {
       cik: string,
     ): Promise<{ id: string; cik: string | null } | undefined>;
   };
+  mappingOnboarding: {
+    persistCompany(input: {
+      cik: string;
+      legalName: string;
+    }): Promise<
+      | { status: "inserted" | "duplicate"; id: string }
+      | { status: "conflict"; conflict: "company-identity" }
+    >;
+    persistInstrument(input: {
+      companyId: string;
+      symbol: string;
+      exchange: string;
+      name: string;
+      assetType: "stock";
+      currency: "USD";
+      country: "US";
+    }): Promise<
+      | { status: "inserted" | "duplicate"; id: string }
+      | { status: "conflict"; conflict: "instrument-identity" }
+    >;
+    persistRevision(
+      input: MappingRevisionInput,
+    ): Promise<
+      | { status: "inserted" | "duplicate" }
+      | { status: "conflict"; conflict: "mapping-revision" }
+    >;
+  };
   secFilings: {
     persist(input: SecFilingInput): Promise<RepositoryWriteResult>;
   };
@@ -142,6 +171,27 @@ export interface Repositories {
   withTransaction<T>(
     operation: (repositories: Repositories) => Promise<T>,
   ): Promise<T>;
+}
+export interface MappingRevisionInput {
+  mappingId: string;
+  revision: number;
+  revisionId: string;
+  instrumentId: string;
+  companyId: string;
+  lifecycle: "active" | "retired" | "superseded";
+  successorRevisionId: string | null;
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+  changeReason: string;
+  listingEvidenceSourceId: string;
+  listingEvidenceReference: string;
+  listingEvidenceRetrievedAt: Date;
+  secEvidenceSourceId: string;
+  secEvidenceReference: string;
+  secEvidenceRetrievedAt: Date;
+  approvalStatus: "approved";
+  approvedBy: string;
+  approvedAt: Date;
 }
 
 export function normalizeSecCik(value: string): string {
@@ -321,6 +371,98 @@ export function createRepositories(
             .where(eq(companies.cik, canonicalCik))
             .limit(1)
         )[0];
+      },
+    },
+    mappingOnboarding: {
+      async persistCompany(input) {
+        const cik = normalizeSecCik(input.cik);
+        const inserted = await database
+          .insert(companies)
+          .values({ cik, legalName: input.legalName, country: "US" })
+          .onConflictDoNothing({ target: [companies.cik] })
+          .returning({ id: companies.id });
+        if (inserted[0]) return { status: "inserted", id: inserted[0].id };
+        const existing = (
+          await database
+            .select()
+            .from(companies)
+            .where(eq(companies.cik, cik))
+            .limit(1)
+        )[0];
+        if (!existing)
+          throw new Error(
+            "Company conflict occurred but existing row could not be loaded",
+          );
+        return existing.legalName === input.legalName
+          ? { status: "duplicate", id: existing.id }
+          : { status: "conflict", conflict: "company-identity" };
+      },
+      async persistInstrument(input) {
+        const inserted = await database
+          .insert(instruments)
+          .values({ ...input, active: true })
+          .onConflictDoNothing({
+            target: [instruments.symbol, instruments.exchange],
+          })
+          .returning({ id: instruments.id });
+        if (inserted[0]) return { status: "inserted", id: inserted[0].id };
+        const existing = (
+          await database
+            .select()
+            .from(instruments)
+            .where(
+              and(
+                eq(instruments.symbol, input.symbol),
+                eq(instruments.exchange, input.exchange),
+              ),
+            )
+            .limit(1)
+        )[0];
+        if (!existing)
+          throw new Error(
+            "Instrument conflict occurred but existing row could not be loaded",
+          );
+        return existing.companyId === input.companyId &&
+          existing.name === input.name &&
+          existing.assetType === input.assetType &&
+          existing.currency === input.currency &&
+          existing.country === input.country
+          ? { status: "duplicate", id: existing.id }
+          : { status: "conflict", conflict: "instrument-identity" };
+      },
+      async persistRevision(input) {
+        const inserted = await database
+          .insert(curatedStockMappingRevisions)
+          .values(input)
+          .onConflictDoNothing({
+            target: [curatedStockMappingRevisions.revisionId],
+          })
+          .returning({ id: curatedStockMappingRevisions.id });
+        if (inserted[0]) return { status: "inserted" };
+        const existing = (
+          await database
+            .select()
+            .from(curatedStockMappingRevisions)
+            .where(
+              eq(curatedStockMappingRevisions.revisionId, input.revisionId),
+            )
+            .limit(1)
+        )[0];
+        if (!existing)
+          throw new Error(
+            "Mapping revision conflict occurred but existing row could not be loaded",
+          );
+        return existing.mappingId === input.mappingId &&
+          existing.revision === input.revision &&
+          existing.instrumentId === input.instrumentId &&
+          existing.companyId === input.companyId &&
+          existing.lifecycle === input.lifecycle &&
+          existing.successorRevisionId === input.successorRevisionId &&
+          existing.changeReason === input.changeReason &&
+          existing.approvedBy === input.approvedBy &&
+          existing.approvedAt.getTime() === input.approvedAt.getTime()
+          ? { status: "duplicate" }
+          : { status: "conflict", conflict: "mapping-revision" };
       },
     },
     secFilings: {
