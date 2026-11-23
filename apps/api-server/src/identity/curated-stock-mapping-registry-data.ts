@@ -10,4 +10,5 @@ import {
 export const curatedStockMappingRegistry: CuratedStockMappingRegistry = {
   version: CURATED_STOCK_MAPPING_REGISTRY_VERSION,
   revisions: [],
+  lifecycleEvents: [],
 };

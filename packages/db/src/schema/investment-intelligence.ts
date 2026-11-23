@@ -169,6 +169,48 @@ export const curatedStockMappingRevisions = pgTable(
       table.revision,
     ),
     index("curated_stock_mapping_instrument_idx").on(table.instrumentId),
+    check(
+      "curated_stock_mapping_effective_dates_check",
+      sql`${table.effectiveTo} is null or ${table.effectiveTo} >= ${table.effectiveFrom}`,
+    ),
+    check(
+      "curated_stock_mapping_approval_status_check",
+      sql`${table.approvalStatus} in ('approved', 'pending', 'rejected')`,
+    ),
+    check(
+      "curated_stock_mapping_initial_lifecycle_check",
+      sql`${table.lifecycle} = 'active' and ${table.successorRevisionId} is null`,
+    ),
+  ],
+);
+
+/** Append-only lifecycle observations let a revision become superseded without rewriting it. */
+export const curatedStockMappingLifecycleEvents = pgTable(
+  "curated_stock_mapping_lifecycle_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    revisionId: varchar("revision_id", { length: 80 })
+      .notNull()
+      .references(() => curatedStockMappingRevisions.revisionId),
+    lifecycle: mappingLifecycleEnum("lifecycle").notNull(),
+    successorRevisionId: varchar("successor_revision_id", { length: 80 }),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    unique("curated_stock_mapping_lifecycle_event_unique")
+      .on(
+        table.revisionId,
+        table.lifecycle,
+        table.successorRevisionId,
+        table.effectiveFrom,
+        table.recordedAt,
+      )
+      .nullsNotDistinct(),
+    check(
+      "curated_stock_mapping_lifecycle_event_successor_check",
+      sql`(${table.lifecycle} = 'superseded') = (${table.successorRevisionId} is not null)`,
+    ),
   ],
 );
 

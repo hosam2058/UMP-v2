@@ -38,11 +38,10 @@ export class CuratedStockMappingOnboardingService {
         "INVALID_REGISTRY",
         validation.errors.map((item) => item.code).join(", "),
       );
-    const eligible = registry.revisions.filter(
-      (revision) =>
-        revision.lifecycle === "active" &&
-        revision.approval.status === "approved",
-    );
+    // Runtime validation is intentionally separate. Pending/rejected and later
+    // retired records remain valid historical ledger entries.
+    // Store complete validated history; runtime eligibility remains separate.
+    const eligible = registry.revisions;
     return this.dependencies.repositories.withTransaction(
       async (repositories) => {
         let inserted = 0;
@@ -51,6 +50,20 @@ export class CuratedStockMappingOnboardingService {
           const result = await this.persist(repositories, revision);
           if (result === "inserted") inserted += 1;
           else duplicate += 1;
+        }
+        for (const event of registry.lifecycleEvents) {
+          const result = await repositories.mappingOnboarding.persistLifecycleEvent({
+            revisionId: event.revisionId,
+            lifecycle: event.lifecycle,
+            successorRevisionId: event.successorRevisionId ?? null,
+            effectiveFrom: new Date(event.effectiveFrom),
+            recordedAt: new Date(event.recordedAt),
+          });
+          if (result.status === "conflict")
+            throw new CuratedStockMappingOnboardingError(
+              "PERSISTENCE_CONFLICT",
+              "Lifecycle event conflicts with an existing immutable event.",
+            );
         }
         return { inserted, duplicate };
       },
@@ -120,7 +133,7 @@ export class CuratedStockMappingOnboardingService {
       secEvidenceSourceId: secSource.id,
       secEvidenceReference: revision.secCompanyEvidence.reference,
       secEvidenceRetrievedAt: new Date(revision.secCompanyEvidence.retrievedAt),
-      approvalStatus: "approved",
+      approvalStatus: revision.approval.status,
       approvedBy: revision.approval.approvedBy,
       approvedAt: new Date(revision.approval.approvedAt),
     });
@@ -128,6 +141,20 @@ export class CuratedStockMappingOnboardingService {
       throw new CuratedStockMappingOnboardingError(
         "PERSISTENCE_CONFLICT",
         "Mapping revision conflicts with an existing immutable revision.",
+      );
+    const initialEvent = await repositories.mappingOnboarding.persistLifecycleEvent({
+      revisionId: revision.revisionId,
+      lifecycle: revision.lifecycle,
+      successorRevisionId: null,
+      effectiveFrom: new Date(revision.effectiveFrom),
+      // Approval is the source-controlled record of when the initial state was
+      // entered; a later transition supplies its own recordedAt.
+      recordedAt: new Date(revision.approval.approvedAt),
+    });
+    if (initialEvent.status === "conflict")
+      throw new CuratedStockMappingOnboardingError(
+        "PERSISTENCE_CONFLICT",
+        "Initial lifecycle event conflicts with an existing immutable event.",
       );
     return ledger.status;
   }

@@ -3,6 +3,7 @@ import type { createDatabase } from "./index";
 import {
   companies,
   curatedStockMappingRevisions,
+  curatedStockMappingLifecycleEvents,
   dataSources,
   fundamentalFacts,
   ingestionRecords,
@@ -150,6 +151,16 @@ export interface Repositories {
       | { status: "inserted" | "duplicate" }
       | { status: "conflict"; conflict: "mapping-revision" }
     >;
+    persistLifecycleEvent(input: {
+      revisionId: string;
+      lifecycle: "active" | "retired" | "superseded";
+      successorRevisionId: string | null;
+      effectiveFrom: Date;
+      recordedAt: Date;
+    }): Promise<
+      | { status: "inserted" | "duplicate" }
+      | { status: "conflict"; conflict: "lifecycle-event" }
+    >;
   };
   secFilings: {
     persist(input: SecFilingInput): Promise<RepositoryWriteResult>;
@@ -189,7 +200,7 @@ export interface MappingRevisionInput {
   secEvidenceSourceId: string;
   secEvidenceReference: string;
   secEvidenceRetrievedAt: Date;
-  approvalStatus: "approved";
+  approvalStatus: "approved" | "pending" | "rejected";
   approvedBy: string;
   approvedAt: Date;
 }
@@ -400,7 +411,9 @@ export function createRepositories(
       async persistInstrument(input) {
         const inserted = await database
           .insert(instruments)
-          .values({ ...input, active: true })
+          // Mapping-ledger eligibility, never this legacy broad instrument flag,
+          // authorizes curated runtime support. Historical onboarding stays inert.
+          .values({ ...input, active: false })
           .onConflictDoNothing({
             target: [instruments.symbol, instruments.exchange],
           })
@@ -434,9 +447,9 @@ export function createRepositories(
         const inserted = await database
           .insert(curatedStockMappingRevisions)
           .values(input)
-          .onConflictDoNothing({
-            target: [curatedStockMappingRevisions.revisionId],
-          })
+          // Either immutable identity can collide. Inspect both instead of
+          // treating a mapping/revision collision as an unexplained duplicate.
+          .onConflictDoNothing()
           .returning({ id: curatedStockMappingRevisions.id });
         if (inserted[0]) return { status: "inserted" };
         const existing = (
@@ -448,21 +461,96 @@ export function createRepositories(
             )
             .limit(1)
         )[0];
-        if (!existing)
+        if (!existing) {
+          const existingMappingRevision = (
+            await database
+              .select()
+              .from(curatedStockMappingRevisions)
+              .where(
+                and(
+                  eq(curatedStockMappingRevisions.mappingId, input.mappingId),
+                  eq(curatedStockMappingRevisions.revision, input.revision),
+                ),
+              )
+              .limit(1)
+          )[0];
+          if (existingMappingRevision)
+            return { status: "conflict", conflict: "mapping-revision" };
           throw new Error(
-            "Mapping revision conflict occurred but existing row could not be loaded",
+            "Mapping revision conflict occurred but existing rows could not be loaded",
           );
+        }
         return existing.mappingId === input.mappingId &&
           existing.revision === input.revision &&
           existing.instrumentId === input.instrumentId &&
           existing.companyId === input.companyId &&
           existing.lifecycle === input.lifecycle &&
           existing.successorRevisionId === input.successorRevisionId &&
+          existing.effectiveFrom.getTime() === input.effectiveFrom.getTime() &&
+          (existing.effectiveTo?.getTime() ?? null) ===
+            (input.effectiveTo?.getTime() ?? null) &&
           existing.changeReason === input.changeReason &&
+          existing.listingEvidenceSourceId === input.listingEvidenceSourceId &&
+          existing.listingEvidenceReference ===
+            input.listingEvidenceReference &&
+          existing.listingEvidenceRetrievedAt.getTime() ===
+            input.listingEvidenceRetrievedAt.getTime() &&
+          existing.secEvidenceSourceId === input.secEvidenceSourceId &&
+          existing.secEvidenceReference === input.secEvidenceReference &&
+          existing.secEvidenceRetrievedAt.getTime() ===
+            input.secEvidenceRetrievedAt.getTime() &&
+          existing.approvalStatus === input.approvalStatus &&
           existing.approvedBy === input.approvedBy &&
           existing.approvedAt.getTime() === input.approvedAt.getTime()
           ? { status: "duplicate" }
           : { status: "conflict", conflict: "mapping-revision" };
+      },
+      async persistLifecycleEvent(input) {
+        const inserted = await database
+          .insert(curatedStockMappingLifecycleEvents)
+          .values(input)
+          .onConflictDoNothing({
+            target: [
+              curatedStockMappingLifecycleEvents.revisionId,
+              curatedStockMappingLifecycleEvents.lifecycle,
+              curatedStockMappingLifecycleEvents.successorRevisionId,
+              curatedStockMappingLifecycleEvents.effectiveFrom,
+              curatedStockMappingLifecycleEvents.recordedAt,
+            ],
+          })
+          .returning({ id: curatedStockMappingLifecycleEvents.id });
+        if (inserted[0]) return { status: "inserted" };
+        const existing = (
+          await database
+            .select()
+            .from(curatedStockMappingLifecycleEvents)
+            .where(
+              and(
+                eq(curatedStockMappingLifecycleEvents.revisionId, input.revisionId),
+                eq(curatedStockMappingLifecycleEvents.lifecycle, input.lifecycle),
+                input.successorRevisionId === null
+                  ? isNull(
+                      curatedStockMappingLifecycleEvents.successorRevisionId,
+                    )
+                  : eq(
+                      curatedStockMappingLifecycleEvents.successorRevisionId,
+                      input.successorRevisionId,
+                    ),
+                eq(
+                  curatedStockMappingLifecycleEvents.effectiveFrom,
+                  input.effectiveFrom,
+                ),
+                eq(
+                  curatedStockMappingLifecycleEvents.recordedAt,
+                  input.recordedAt,
+                ),
+              ),
+            )
+            .limit(1)
+        )[0];
+        return existing
+          ? { status: "duplicate" }
+          : { status: "conflict", conflict: "lifecycle-event" };
       },
     },
     secFilings: {

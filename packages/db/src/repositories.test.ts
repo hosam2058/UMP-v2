@@ -596,3 +596,40 @@ test("DTOs contain no SEC mapping or API fields", () => {
   assert.equal("cik" in filing, false);
   assert.equal("response" in fact, false);
 });
+
+test("lifecycle events are exact-idempotent and carry effective and recorded timestamps", async () => {
+  const effectiveFrom = new Date("2026-03-01T00:00:00.000Z");
+  const recordedAt = new Date("2026-03-02T00:00:00.000Z");
+  const fake = fakeDatabase({ insertResults: [[{ id: "event-1" }]] });
+  const result = await createRepositories(fake.database as never)
+    .mappingOnboarding.persistLifecycleEvent({
+      revisionId: "fictional-acme-common@1",
+      lifecycle: "retired",
+      successorRevisionId: null,
+      effectiveFrom,
+      recordedAt,
+    });
+  assert.deepEqual(result, { status: "inserted" });
+  assert.deepEqual(fake.calls[0]?.value, {
+    revisionId: "fictional-acme-common@1",
+    lifecycle: "retired",
+    successorRevisionId: null,
+    effectiveFrom,
+    recordedAt,
+  });
+});
+
+test("lifecycle event duplicate lookup treats null successor as an exact duplicate", async () => {
+  const effectiveFrom = new Date("2026-03-01T00:00:00.000Z");
+  const recordedAt = new Date("2026-03-02T00:00:00.000Z");
+  const fake = fakeDatabase({ insertResults: [[]], selectRows: [[{ id: "event-1" }]] });
+  const result = await createRepositories(fake.database as never)
+    .mappingOnboarding.persistLifecycleEvent({
+      revisionId: "fictional-acme-common@1",
+      lifecycle: "retired",
+      successorRevisionId: null,
+      effectiveFrom,
+      recordedAt,
+    });
+  assert.deepEqual(result, { status: "duplicate" });
+});
