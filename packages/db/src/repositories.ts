@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import type { createDatabase } from "./index";
 import {
   companies,
@@ -116,6 +116,48 @@ export interface FundamentalFactCorrection {
   sourceAsOf: Date | null;
   fetchedAt: Date;
 }
+export interface StoredSecCompany {
+  id: string;
+  cik: string;
+  legalName: string;
+}
+export interface StoredSecFiling {
+  accessionNumber: string;
+  form: string;
+  filingDate: string;
+  reportDate: string | null;
+  primaryDocument: string | null;
+  sourceUrl: string;
+  fetchedAt: Date;
+  source: { provider: string; name: string; baseUrl: string | null };
+}
+export interface StoredFundamentalFact {
+  taxonomy: string;
+  tag: string;
+  unit: string;
+  value: string;
+  accessionNumber: string;
+  form: string;
+  filingDate: string;
+  reportingStart: string | null;
+  reportingEnd: string;
+  fiscalYear: number | null;
+  fiscalPeriod: string | null;
+  frame: string | null;
+  sourceAsOf: Date | null;
+  fetchedAt: Date;
+  source: { provider: string; name: string; baseUrl: string | null };
+}
+export interface FundamentalFactQuery {
+  companyId: string;
+  taxonomy?: string;
+  tag?: string;
+  fiscalYear?: number;
+  fiscalPeriod?: string;
+  form?: string;
+  reportingEnd?: string;
+  limit: number;
+}
 export interface Repositories {
   dataSources: {
     persist(input: DataSourceInput): Promise<DataSourcePersistResult>;
@@ -124,6 +166,16 @@ export interface Repositories {
     findExistingByCik(
       cik: string,
     ): Promise<{ id: string; cik: string | null } | undefined>;
+  };
+  secQueries: {
+    findCompanyByCik(cik: string): Promise<StoredSecCompany | undefined>;
+    listFilings(input: {
+      companyId: string;
+      limit: number;
+    }): Promise<readonly StoredSecFiling[]>;
+    listFundamentalFacts(
+      input: FundamentalFactQuery,
+    ): Promise<readonly StoredFundamentalFact[]>;
   };
   mappingOnboarding: {
     persistCompany(input: {
@@ -375,13 +427,103 @@ export function createRepositories(
     companies: {
       async findExistingByCik(cik) {
         const canonicalCik = normalizeSecCik(cik);
-        return (
+        const row = (
           await database
             .select({ id: companies.id, cik: companies.cik })
             .from(companies)
             .where(eq(companies.cik, canonicalCik))
             .limit(1)
         )[0];
+        return row ? { ...row, cik: row.cik! } : undefined;
+      },
+    },
+    secQueries: {
+      async findCompanyByCik(cik) {
+        const canonicalCik = normalizeSecCik(cik);
+        const row = (
+          await database
+            .select({
+              id: companies.id,
+              cik: companies.cik,
+              legalName: companies.legalName,
+            })
+            .from(companies)
+            .where(eq(companies.cik, canonicalCik))
+            .limit(1)
+        )[0];
+        return row ? { ...row, cik: row.cik! } : undefined;
+      },
+      async listFilings(input) {
+        return database
+          .select({
+            accessionNumber: secFilings.accessionNumber,
+            form: secFilings.form,
+            filingDate: secFilings.filingDate,
+            reportDate: secFilings.reportDate,
+            primaryDocument: secFilings.primaryDocument,
+            sourceUrl: secFilings.sourceUrl,
+            fetchedAt: secFilings.fetchedAt,
+            source: {
+              provider: dataSources.provider,
+              name: dataSources.name,
+              baseUrl: dataSources.baseUrl,
+            },
+          })
+          .from(secFilings)
+          .innerJoin(dataSources, eq(secFilings.sourceId, dataSources.id))
+          .where(eq(secFilings.companyId, input.companyId))
+          .orderBy(desc(secFilings.filingDate), desc(secFilings.accessionNumber))
+          .limit(input.limit);
+      },
+      async listFundamentalFacts(input) {
+        const conditions = [
+          eq(fundamentalFacts.companyId, input.companyId),
+          input.taxonomy === undefined
+            ? undefined
+            : eq(fundamentalFacts.taxonomy, input.taxonomy),
+          input.tag === undefined ? undefined : eq(fundamentalFacts.tag, input.tag),
+          input.fiscalYear === undefined
+            ? undefined
+            : eq(fundamentalFacts.fiscalYear, input.fiscalYear),
+          input.fiscalPeriod === undefined
+            ? undefined
+            : eq(fundamentalFacts.fiscalPeriod, input.fiscalPeriod),
+          input.form === undefined ? undefined : eq(fundamentalFacts.form, input.form),
+          input.reportingEnd === undefined
+            ? undefined
+            : eq(fundamentalFacts.reportingEnd, input.reportingEnd),
+        ];
+        return database
+          .select({
+            taxonomy: fundamentalFacts.taxonomy,
+            tag: fundamentalFacts.tag,
+            unit: fundamentalFacts.unit,
+            value: fundamentalFacts.value,
+            accessionNumber: fundamentalFacts.accessionNumber,
+            form: fundamentalFacts.form,
+            filingDate: fundamentalFacts.filingDate,
+            reportingStart: fundamentalFacts.reportingStart,
+            reportingEnd: fundamentalFacts.reportingEnd,
+            fiscalYear: fundamentalFacts.fiscalYear,
+            fiscalPeriod: fundamentalFacts.fiscalPeriod,
+            frame: fundamentalFacts.frame,
+            sourceAsOf: fundamentalFacts.sourceAsOf,
+            fetchedAt: fundamentalFacts.fetchedAt,
+            source: {
+              provider: dataSources.provider,
+              name: dataSources.name,
+              baseUrl: dataSources.baseUrl,
+            },
+          })
+          .from(fundamentalFacts)
+          .innerJoin(dataSources, eq(fundamentalFacts.sourceId, dataSources.id))
+          .where(and(...conditions))
+          .orderBy(
+            desc(fundamentalFacts.reportingEnd),
+            desc(fundamentalFacts.filingDate),
+            desc(fundamentalFacts.accessionNumber),
+          )
+          .limit(input.limit);
       },
     },
     mappingOnboarding: {

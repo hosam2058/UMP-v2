@@ -68,16 +68,19 @@ function fakeDatabase(config: FakeConfig = {}) {
   const updateResults = [...(config.updateResults ?? [])];
 
   const database = {
-    select: () => ({
-      from: () => ({
-        where: () => ({
-          limit: async () => {
-            calls.push({ operation: "select", label: config.label });
-            return selectRows.shift() ?? [];
-          },
-        }),
-      }),
-    }),
+    select: () => {
+      const selection = () => ({
+        from: () => selection(),
+        innerJoin: () => selection(),
+        where: () => selection(),
+        orderBy: () => selection(),
+        limit: async (value?: number) => {
+          calls.push({ operation: "select", value, label: config.label });
+          return selectRows.shift() ?? [];
+        },
+      });
+      return selection();
+    },
 
     insert: () => ({
       values: (value: unknown) => {
@@ -632,4 +635,35 @@ test("lifecycle event duplicate lookup treats null successor as an exact duplica
       recordedAt,
     });
   assert.deepEqual(result, { status: "duplicate" });
+});
+
+test("stored SEC query repository joins provenance and applies caller bounds", async () => {
+  const factRow = {
+    taxonomy: "us-gaap",
+    tag: "Assets",
+    unit: "USD",
+    value: "123",
+    accessionNumber: "0000000000-26-000001",
+    form: "10-K",
+    filingDate: "2026-02-01",
+    reportingStart: null,
+    reportingEnd: "2025-12-31",
+    fiscalYear: 2025,
+    fiscalPeriod: "FY",
+    frame: null,
+    sourceAsOf: null,
+    fetchedAt: new Date("2026-02-02T00:00:00.000Z"),
+    source: { provider: "sec-edgar", name: "SEC EDGAR", baseUrl: "https://data.sec.gov" },
+  };
+  const fake = fakeDatabase({ selectRows: [[factRow]] });
+  const result = await createRepositories(fake.database as never)
+    .secQueries.listFundamentalFacts({
+      companyId: "company-1",
+      taxonomy: "us-gaap",
+      tag: "Assets",
+      fiscalYear: 2025,
+      limit: 3,
+    });
+  assert.deepEqual(result, [factRow]);
+  assert.equal(fake.calls.find((call) => call.operation === "select")?.value, 3);
 });
