@@ -518,7 +518,7 @@ export class StoredSecQueryService {
       facts.length === 0 && anyFactsExist && options.request !== undefined;
     const filingsStatus = provenanceStatus(filings, filingHasValidProvenance);
     const factsStatus = provenanceStatus(facts, factHasValidProvenance);
-    const hasStoredData = filings.length > 0 || facts.length > 0;
+    const hasStoredData = filings.length > 0 || anyFactsExist;
 
     return {
       status: "available",

@@ -131,6 +131,16 @@ test("readiness distinguishes unknown company, empty datasets, and missing reque
   assert.equal(missingResult.fundamentals.request?.reportingEnd, "2025-12-31");
   assert.equal(missingResult.freshness.status, "unknown");
   assert.equal(missing.calls.filter((call) => call.startsWith("facts:")).length, 2);
+
+  const missingOnlyFacts = harness({ filings: [], facts: [fact] });
+  const missingOnlyFactsResult = await missingOnlyFacts.service.assessFinancialDataReadinessByCik("123456", {
+    factFilter: { taxonomy: "ifrs-full", tag: "Assets" },
+  });
+  assert.equal(missingOnlyFactsResult.status, "available");
+  if (missingOnlyFactsResult.status === "available") {
+    assert.equal(missingOnlyFactsResult.fundamentals.availability, "requested-data-missing");
+    assert.equal(missingOnlyFactsResult.freshness.status, "unknown");
+  }
 });
 
 test("readiness reports validated provenance without inventing freshness", async () => {
