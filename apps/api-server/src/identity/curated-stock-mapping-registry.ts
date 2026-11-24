@@ -51,12 +51,18 @@ function evidence(value: CuratedStockMappingEvidence | undefined, label: string,
   if (!present(value?.source) || !present(value?.reference) || !timestamp(value?.retrievedAt)) errors.push(error(index, "INVALID_EVIDENCE", `${label} requires source, reference, and a valid retrieval timestamp.`));
 }
 
-/** Deterministic current state after valid transitions, ordered as in source control. */
-export function effectiveCuratedStockMappingLifecycles(registry: CuratedStockMappingRegistry): ReadonlyMap<string, CuratedStockMappingLifecycle> {
+/**
+ * Deterministic lifecycle state at an optional point in time. Without an
+ * as-of value this returns the complete historical projection for validation.
+ */
+export function effectiveCuratedStockMappingLifecycles(registry: CuratedStockMappingRegistry, asOf?: Date): ReadonlyMap<string, CuratedStockMappingLifecycle> {
   const states = new Map<string, CuratedStockMappingLifecycle>(
     registry.revisions.map((revision) => [revision.revisionId, revision.lifecycle]),
   );
-  for (const event of registry.lifecycleEvents) states.set(event.revisionId, event.lifecycle);
+  for (const event of registry.lifecycleEvents) {
+    if (asOf === undefined || Date.parse(event.effectiveFrom) <= asOf.getTime())
+      states.set(event.revisionId, event.lifecycle);
+  }
   return states;
 }
 
@@ -115,10 +121,15 @@ export function validateCuratedStockMappingRegistry(registry: CuratedStockMappin
 }
 
 /** Historical records remain inert unless their effective lifecycle is active and approval is explicit. */
-export function validateCuratedStockMappingRuntimeEligibility(registry: CuratedStockMappingRegistry): CuratedStockMappingRuntimeEligibilityResult {
+export function validateCuratedStockMappingRuntimeEligibility(registry: CuratedStockMappingRegistry, asOf: Date = new Date()): CuratedStockMappingRuntimeEligibilityResult {
   const historical = validateCuratedStockMappingRegistry(registry); if (!historical.ok) return historical;
-  const states = effectiveCuratedStockMappingLifecycles(registry);
-  const projected: CuratedSecSupportedStockMapping[] = registry.revisions.filter((record) => states.get(record.revisionId) === "active" && record.approval.status === "approved").map((record) => ({ instrument: record.instrument, company: record.company, companyRelationship: { companyCik: record.company.cik }, mappingProvenance: record.exchangeListingEvidence, approval: record.approval, active: true }));
+  const states = effectiveCuratedStockMappingLifecycles(registry, asOf);
+  const projected: CuratedSecSupportedStockMapping[] = registry.revisions.filter((record) =>
+    states.get(record.revisionId) === "active" &&
+    record.approval.status === "approved" &&
+    Date.parse(record.effectiveFrom) <= asOf.getTime() &&
+    (record.effectiveTo === undefined || asOf.getTime() < Date.parse(record.effectiveTo))
+  ).map((record) => ({ instrument: record.instrument, company: record.company, companyRelationship: { companyCik: record.company.cik }, mappingProvenance: record.exchangeListingEvidence, approval: record.approval, active: true }));
   const validated = validateCuratedSecSupportedStockMappings(projected);
   return validated.ok ? validated : { ok: false, errors: validated.errors.map((item) => error(item.index, "INVALID_COMPANY_IDENTITY", item.message)) };
 }

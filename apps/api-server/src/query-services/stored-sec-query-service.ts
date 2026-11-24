@@ -1,4 +1,9 @@
 import { normalizeSecCik, type Repositories } from "@ump/db";
+import type {
+  CuratedMappingRuntimeAuthorizationService,
+  RuntimeAuthorizationResult,
+  SupportedInstrumentIdentity,
+} from "../identity/curated-mapping-runtime-authorization";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -82,6 +87,21 @@ export type StoredSecInstrumentResult = {
   status: "unsupported";
   reason: "CURATED_MAPPING_RUNTIME_AUTHORIZATION_UNAVAILABLE";
 };
+type AuthorizedInstrumentResult = Exclude<
+  RuntimeAuthorizationResult,
+  { status: "available" }
+>;
+type InstrumentCollectionResult<T> =
+  | {
+      status: "available";
+      company: StoredSecCompany;
+      mapping: Extract<RuntimeAuthorizationResult, { status: "available" }> ["authorization"]["mapping"];
+      items: readonly T[];
+      limit: number;
+    }
+  | AuthorizedInstrumentResult
+  | { status: "invalid-input"; reason: string }
+  | StoredSecInstrumentResult;
 
 function nonBlank(value: string | undefined): boolean {
   return value === undefined || value.trim().length > 0;
@@ -99,7 +119,10 @@ function validatedLimit(value: number | undefined): number | undefined {
  * It never contacts a provider and deliberately has no database write path.
  */
 export class StoredSecQueryService {
-  constructor(private readonly repositories: Repositories) {}
+  constructor(
+    private readonly repositories: Repositories,
+    private readonly runtimeAuthorizer?: CuratedMappingRuntimeAuthorizationService,
+  ) {}
 
   async resolveCompanyByCik(cik: string): Promise<CompanyResult> {
     const company = await this.resolveStoredCompany(cik);
@@ -173,15 +196,71 @@ export class StoredSecQueryService {
   }
 
   /**
-   * Source-controlled registry validation is not yet composed into this runtime
-   * read service. Reject every instrument request instead of trusting a ticker,
-   * instruments.active, or a persisted mapping row as authorization.
+   * A missing runtime authorizer remains fail-closed; ticker, instruments.active,
+   * and persisted mappings alone are never authorization.
    */
-  async getCompanyDataByInstrument(): Promise<StoredSecInstrumentResult> {
+  async getCompanyDataByInstrument(
+    instrument?: SupportedInstrumentIdentity,
+  ): Promise<
+    | StoredSecInstrumentResult
+    | RuntimeAuthorizationResult
+  > {
+    if (!this.runtimeAuthorizer || !instrument)
+      return {
+        status: "unsupported",
+        reason: "CURATED_MAPPING_RUNTIME_AUTHORIZATION_UNAVAILABLE",
+      };
+    return this.runtimeAuthorizer.resolve(instrument);
+  }
+
+  async getFilingsByInstrument(
+    instrument: SupportedInstrumentIdentity,
+    options: { limit?: number } = {},
+  ): Promise<InstrumentCollectionResult<StoredSecFiling>> {
+    const authorization = await this.getInstrumentAuthorization(instrument);
+    if (authorization.status !== "available") return authorization;
+    const limit = validatedLimit(options.limit);
+    if (limit === undefined)
+      return { status: "invalid-input", reason: "INVALID_LIMIT" };
+    const items = await this.repositories.secQueries.listFilings({
+      companyId: authorization.authorization.company.id,
+      limit,
+    });
     return {
-      status: "unsupported",
-      reason: "CURATED_MAPPING_RUNTIME_AUTHORIZATION_UNAVAILABLE",
+      status: "available",
+      company: authorization.authorization.company,
+      mapping: authorization.authorization.mapping,
+      items,
+      limit,
     };
+  }
+
+  async getFundamentalFactsByInstrument(
+    instrument: SupportedInstrumentIdentity,
+    filter: StoredFundamentalFactFilter = {},
+  ): Promise<InstrumentCollectionResult<StoredFundamentalFact>> {
+    const authorization = await this.getInstrumentAuthorization(instrument);
+    if (authorization.status !== "available") return authorization;
+    const validation = this.validateFactFilter(filter);
+    if (typeof validation === "string")
+      return { status: "invalid-input", reason: validation };
+    const items = await this.repositories.secQueries.listFundamentalFacts({
+      companyId: authorization.authorization.company.id,
+      ...validation,
+    });
+    return {
+      status: "available",
+      company: authorization.authorization.company,
+      mapping: authorization.authorization.mapping,
+      items,
+      limit: validation.limit,
+    };
+  }
+
+  private async getInstrumentAuthorization(
+    instrument: SupportedInstrumentIdentity,
+  ): Promise<RuntimeAuthorizationResult | StoredSecInstrumentResult> {
+    return this.getCompanyDataByInstrument(instrument);
   }
 
   private validateFactFilter(

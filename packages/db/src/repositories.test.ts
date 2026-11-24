@@ -667,3 +667,21 @@ test("stored SEC query repository joins provenance and applies caller bounds", a
   assert.deepEqual(result, [factRow]);
   assert.equal(fake.calls.find((call) => call.operation === "select")?.value, 3);
 });
+
+test("runtime authorization repository reads a persisted instrument/company relation", async () => {
+  const row = {
+    instrumentId: "instrument-1",
+    symbol: "ACME",
+    exchange: "XNAS",
+    assetType: "stock",
+    currency: "USD",
+    country: "US",
+    active: false,
+    company: { id: "company-1", cik: "0000123456", legalName: "Fictional Acme Corporation" },
+  };
+  const fake = fakeDatabase({ selectRows: [[row]] });
+  const result = await createRepositories(fake.database as never)
+    .runtimeAuthorizations.findInstrumentCompanyByIdentity({ symbol: "ACME", exchange: "XNAS" });
+  assert.deepEqual(result, row);
+  assert.equal(fake.calls.find((call) => call.operation === "select")?.value, 1);
+});

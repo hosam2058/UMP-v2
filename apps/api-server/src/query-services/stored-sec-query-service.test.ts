@@ -18,7 +18,7 @@ const fact: StoredFundamentalFact = {
   fetchedAt: filing.fetchedAt, source: filing.source,
 };
 
-function harness(options: { exists?: boolean; filings?: readonly StoredSecFiling[]; facts?: readonly StoredFundamentalFact[] } = {}) {
+function harness(options: { exists?: boolean; filings?: readonly StoredSecFiling[]; facts?: readonly StoredFundamentalFact[]; runtimeAuthorizer?: { resolve: (input: { symbol: string; exchange: string }) => Promise<unknown> } } = {}) {
   const calls: string[] = [];
   const repositories = {
     secQueries: {
@@ -36,7 +36,7 @@ function harness(options: { exists?: boolean; filings?: readonly StoredSecFiling
       },
     },
   } as unknown as Repositories;
-  return { service: new StoredSecQueryService(repositories), calls };
+  return { service: new StoredSecQueryService(repositories, options.runtimeAuthorizer as never), calls };
 }
 
 test("resolves a stored company by normalized CIK without provider calls", async () => {
@@ -101,4 +101,39 @@ test("rejects every instrument request until curated runtime authority is compos
     reason: "CURATED_MAPPING_RUNTIME_AUTHORIZATION_UNAVAILABLE",
   });
   assert.deepEqual(h.calls, []);
+});
+
+test("returns stored data by instrument only after runtime authorization", async () => {
+  const runtimeCalls: string[] = [];
+  const authorized = {
+    resolve: async (input: { symbol: string; exchange: string }) => {
+      runtimeCalls.push(input.symbol + ":" + input.exchange);
+      return {
+        status: "available",
+        authorization: {
+          instrument: { id: "instrument-1", symbol: "ACME", exchange: "XNAS" },
+          company,
+          mapping: {
+            registryVersion: 2, mappingId: "fictional-acme-common", revision: 1,
+            revisionId: "fictional-acme-common@1", lifecycle: "active", effectiveFrom: "2026-01-01T00:00:00.000Z",
+            listingEvidence: { source: "fixture", reference: "listing", retrievedAt: "2026-01-01T00:00:00.000Z" },
+            secCompanyEvidence: { source: "fixture", reference: "cik", retrievedAt: "2026-01-01T00:00:00.000Z" },
+            approval: { approvedBy: "fixture-reviewer", approvedAt: "2026-01-02T00:00:00.000Z" },
+          },
+        },
+      };
+    },
+  };
+  const h = harness({ runtimeAuthorizer: authorized });
+  const result = await h.service.getFilingsByInstrument({ symbol: "ACME", exchange: "XNAS" }, { limit: 2 });
+  assert.equal(result.status, "available");
+  if (result.status !== "available") return;
+  assert.deepEqual(result.items, [filing]);
+  assert.equal(result.mapping.revisionId, "fictional-acme-common@1");
+  assert.deepEqual(runtimeCalls, ["ACME:XNAS"]);
+  assert.deepEqual(h.calls, ["filings:company-1:2"]);
+
+  const denied = harness({ runtimeAuthorizer: { resolve: async () => ({ status: "unauthorized-mapping", reason: "PENDING_MAPPING" }) } });
+  assert.deepEqual(await denied.service.getFundamentalFactsByInstrument({ symbol: "ACME", exchange: "XNAS" }), { status: "unauthorized-mapping", reason: "PENDING_MAPPING" });
+  assert.deepEqual(denied.calls, []);
 });

@@ -158,6 +158,16 @@ export interface FundamentalFactQuery {
   reportingEnd?: string;
   limit: number;
 }
+export interface StoredInstrumentCompany {
+  instrumentId: string;
+  symbol: string;
+  exchange: string | null;
+  assetType: string;
+  currency: string;
+  country: string | null;
+  active: boolean;
+  company: StoredSecCompany;
+}
 export interface Repositories {
   dataSources: {
     persist(input: DataSourceInput): Promise<DataSourcePersistResult>;
@@ -176,6 +186,12 @@ export interface Repositories {
     listFundamentalFacts(
       input: FundamentalFactQuery,
     ): Promise<readonly StoredFundamentalFact[]>;
+  };
+  runtimeAuthorizations: {
+    findInstrumentCompanyByIdentity(input: {
+      symbol: string;
+      exchange: string;
+    }): Promise<StoredInstrumentCompany | undefined>;
   };
   mappingOnboarding: {
     persistCompany(input: {
@@ -524,6 +540,39 @@ export function createRepositories(
             desc(fundamentalFacts.accessionNumber),
           )
           .limit(input.limit);
+      },
+    },
+    runtimeAuthorizations: {
+      async findInstrumentCompanyByIdentity(input) {
+        const row = (
+          await database
+            .select({
+              instrumentId: instruments.id,
+              symbol: instruments.symbol,
+              exchange: instruments.exchange,
+              assetType: instruments.assetType,
+              currency: instruments.currency,
+              country: instruments.country,
+              active: instruments.active,
+              company: {
+                id: companies.id,
+                cik: companies.cik,
+                legalName: companies.legalName,
+              },
+            })
+            .from(instruments)
+            .innerJoin(companies, eq(instruments.companyId, companies.id))
+            .where(
+              and(
+                eq(instruments.symbol, input.symbol),
+                eq(instruments.exchange, input.exchange),
+              ),
+            )
+            .limit(1)
+        )[0];
+        return row && row.company.cik
+          ? { ...row, company: { ...row.company, cik: row.company.cik } }
+          : undefined;
       },
     },
     mappingOnboarding: {
