@@ -137,11 +137,11 @@ export class StoredSecQueryService {
     cik: string,
     options: { limit?: number } = {},
   ): Promise<CollectionResult<StoredSecFiling>> {
-    const company = await this.resolveStoredCompany(cik);
-    if (company.status !== "available") return company;
     const limit = validatedLimit(options.limit);
     if (limit === undefined)
       return { status: "invalid-input", reason: "INVALID_LIMIT" };
+    const company = await this.resolveStoredCompany(cik);
+    if (company.status !== "available") return company;
     const items = await this.repositories.secQueries.listFilings({
       companyId: company.company.id,
       limit,
@@ -158,11 +158,11 @@ export class StoredSecQueryService {
     cik: string,
     filter: StoredFundamentalFactFilter = {},
   ): Promise<CollectionResult<StoredFundamentalFact>> {
-    const company = await this.resolveStoredCompany(cik);
-    if (company.status !== "available") return company;
     const validation = this.validateFactFilter(filter);
     if (typeof validation === "string")
       return { status: "invalid-input", reason: validation };
+    const company = await this.resolveStoredCompany(cik);
+    if (company.status !== "available") return company;
     const items = await this.repositories.secQueries.listFundamentalFacts({
       companyId: company.company.id,
       ...validation,
@@ -201,6 +201,7 @@ export class StoredSecQueryService {
    */
   async getCompanyDataByInstrument(
     instrument?: SupportedInstrumentIdentity,
+    options: { asOf?: Date } = {},
   ): Promise<
     | StoredSecInstrumentResult
     | RuntimeAuthorizationResult
@@ -210,18 +211,18 @@ export class StoredSecQueryService {
         status: "unsupported",
         reason: "CURATED_MAPPING_RUNTIME_AUTHORIZATION_UNAVAILABLE",
       };
-    return this.runtimeAuthorizer.resolve(instrument);
+    return this.runtimeAuthorizer.resolve(instrument, options);
   }
 
   async getFilingsByInstrument(
     instrument: SupportedInstrumentIdentity,
-    options: { limit?: number } = {},
+    options: { limit?: number; asOf?: Date } = {},
   ): Promise<InstrumentCollectionResult<StoredSecFiling>> {
-    const authorization = await this.getInstrumentAuthorization(instrument);
-    if (authorization.status !== "available") return authorization;
     const limit = validatedLimit(options.limit);
     if (limit === undefined)
       return { status: "invalid-input", reason: "INVALID_LIMIT" };
+    const authorization = await this.getInstrumentAuthorization(instrument, { asOf: options.asOf });
+    if (authorization.status !== "available") return authorization;
     const items = await this.repositories.secQueries.listFilings({
       companyId: authorization.authorization.company.id,
       limit,
@@ -237,13 +238,14 @@ export class StoredSecQueryService {
 
   async getFundamentalFactsByInstrument(
     instrument: SupportedInstrumentIdentity,
-    filter: StoredFundamentalFactFilter = {},
+    filter: StoredFundamentalFactFilter & { asOf?: Date } = {},
   ): Promise<InstrumentCollectionResult<StoredFundamentalFact>> {
-    const authorization = await this.getInstrumentAuthorization(instrument);
-    if (authorization.status !== "available") return authorization;
-    const validation = this.validateFactFilter(filter);
+    const { asOf, ...queryFilter } = filter;
+    const validation = this.validateFactFilter(queryFilter);
     if (typeof validation === "string")
       return { status: "invalid-input", reason: validation };
+    const authorization = await this.getInstrumentAuthorization(instrument, { asOf });
+    if (authorization.status !== "available") return authorization;
     const items = await this.repositories.secQueries.listFundamentalFacts({
       companyId: authorization.authorization.company.id,
       ...validation,
@@ -259,8 +261,9 @@ export class StoredSecQueryService {
 
   private async getInstrumentAuthorization(
     instrument: SupportedInstrumentIdentity,
+    options: { asOf?: Date } = {},
   ): Promise<RuntimeAuthorizationResult | StoredSecInstrumentResult> {
-    return this.getCompanyDataByInstrument(instrument);
+    return this.getCompanyDataByInstrument(instrument, options);
   }
 
   private validateFactFilter(

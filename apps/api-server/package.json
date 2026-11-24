@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/config.test.ts src/providers/sec-edgar.test.ts src/ingestion/sec-ingestion.test.ts src/identity/sec-supported-mappings.test.ts src/identity/curated-stock-mapping-registry.test.ts src/identity/curated-stock-mapping-onboarding.test.ts src/identity/curated-mapping-runtime-authorization.test.ts src/query-services/stored-sec-query-service.test.ts",
+    "test": "tsx --test src/config.test.ts src/providers/sec-edgar.test.ts src/ingestion/sec-ingestion.test.ts src/identity/sec-supported-mappings.test.ts src/identity/curated-stock-mapping-registry.test.ts src/identity/curated-stock-mapping-onboarding.test.ts src/identity/curated-mapping-runtime-authorization.test.ts src/query-services/stored-sec-query-service.test.ts src/query-services/trusted-financial-query-runtime.test.ts",
     "test:postgres": "tsx --test src/ingestion/sec-ingestion.postgres.test.ts src/identity/curated-stock-mapping-onboarding.postgres.test.ts src/identity/curated-mapping-runtime-authorization.postgres.test.ts src/query-services/stored-sec-query-service.postgres.test.ts",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs"

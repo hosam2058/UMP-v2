@@ -15,8 +15,7 @@ import {
   CURATED_STOCK_MAPPING_REGISTRY_VERSION,
   type CuratedStockMappingRegistry,
 } from "./curated-stock-mapping-registry";
-import { CuratedMappingRuntimeAuthorizationService } from "./curated-mapping-runtime-authorization";
-import { StoredSecQueryService } from "../query-services/stored-sec-query-service";
+import { createTrustedFinancialQueryRuntime } from "../query-services/trusted-financial-query-runtime";
 
 const FLAG = "UMP_POSTGRES_INTEGRATION";
 const DATABASE = "ump_v2_test";
@@ -97,35 +96,39 @@ test("PostgreSQL: runtime authorization gates persisted SEC reads and rolls back
         });
 
         const repositories = createRepositories(transaction);
-        const authorizer = new CuratedMappingRuntimeAuthorizationService(
+        const runtime = createTrustedFinancialQueryRuntime({
           repositories,
-          registry(symbol, cik, legalName),
-          () => new Date("2026-06-01T00:00:00.000Z"),
-        );
-        const resolution = await authorizer.resolve({ symbol, exchange: "XNAS" });
+          registry: registry(symbol, cik, legalName),
+          clock: () => new Date("2026-06-01T00:00:00.000Z"),
+        });
+        const resolution = await runtime.authorization.resolve({ symbol, exchange: "XNAS" });
         assert.equal(resolution.status, "available");
         if (resolution.status !== "available") throw new Error("Expected authorized runtime resolution.");
         assert.equal(resolution.authorization.company.cik, cik);
         assert.equal(resolution.authorization.mapping.listingEvidence.source, "fictional-exchange");
 
-        const service = new StoredSecQueryService(repositories, authorizer);
-        const filings = await service.getFilingsByInstrument({ symbol, exchange: "XNAS" });
+        const filings = await runtime.queries.getFilingsByInstrument({ symbol, exchange: "XNAS" });
         assert.equal(filings.status, "available");
         if (filings.status !== "available") throw new Error("Expected authorized stored filings.");
         assert.equal(filings.company.cik, cik);
         assert.equal(filings.items[0]?.source.provider, `runtime-auth-${suffix}`);
         assert.equal(filings.mapping.revisionId, "fictional-runtime-authorization@1");
 
-        const disagreeing = new CuratedMappingRuntimeAuthorizationService(
+        const facts = await runtime.queries.getFundamentalFactsByInstrument({ symbol, exchange: "XNAS" });
+        assert.equal(facts.status, "available");
+        if (facts.status !== "available") throw new Error("Expected authorized stored facts.");
+        assert.equal(facts.items[0]?.value, "123.45");
+        assert.equal(facts.items[0]?.source.provider, `runtime-auth-${suffix}`);
+
+        const disagreeing = createTrustedFinancialQueryRuntime({
           repositories,
-          registry(symbol, cik, "Different Fictional Issuer"),
-          () => new Date("2026-06-01T00:00:00.000Z"),
-        );
-        assert.deepEqual(await disagreeing.resolve({ symbol, exchange: "XNAS" }), {
+          registry: registry(symbol, cik, "Different Fictional Issuer"),
+          clock: () => new Date("2026-06-01T00:00:00.000Z"),
+        });
+        assert.deepEqual(await disagreeing.authorization.resolve({ symbol, exchange: "XNAS" }), {
           status: "unauthorized-mapping", reason: "PERSISTED_MAPPING_MISMATCH",
         });
-        const denied = new StoredSecQueryService(repositories, disagreeing);
-        assert.deepEqual(await denied.getFundamentalFactsByInstrument({ symbol, exchange: "XNAS" }), {
+        assert.deepEqual(await disagreeing.queries.getFundamentalFactsByInstrument({ symbol, exchange: "XNAS" }), {
           status: "unauthorized-mapping", reason: "PERSISTED_MAPPING_MISMATCH",
         });
         throw new Rollback();

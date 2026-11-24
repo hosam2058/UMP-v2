@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import type { createDatabase } from "./index";
 import {
   companies,
@@ -488,7 +488,12 @@ export function createRepositories(
           .from(secFilings)
           .innerJoin(dataSources, eq(secFilings.sourceId, dataSources.id))
           .where(eq(secFilings.companyId, input.companyId))
-          .orderBy(desc(secFilings.filingDate), desc(secFilings.accessionNumber))
+          .orderBy(
+            desc(secFilings.filingDate),
+            desc(secFilings.accessionNumber),
+            asc(secFilings.sourceId),
+            asc(secFilings.id),
+          )
           .limit(input.limit);
       },
       async listFundamentalFacts(input) {
@@ -538,6 +543,12 @@ export function createRepositories(
             desc(fundamentalFacts.reportingEnd),
             desc(fundamentalFacts.filingDate),
             desc(fundamentalFacts.accessionNumber),
+            asc(fundamentalFacts.taxonomy),
+            asc(fundamentalFacts.tag),
+            asc(fundamentalFacts.unit),
+            asc(fundamentalFacts.form),
+            asc(fundamentalFacts.sourceId),
+            asc(fundamentalFacts.id),
           )
           .limit(input.limit);
       },

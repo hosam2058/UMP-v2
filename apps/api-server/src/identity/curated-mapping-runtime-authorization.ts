@@ -85,11 +85,19 @@ function currentRevisionState(
  * a persisted canonical instrument/company relation. It performs no writes.
  */
 export class CuratedMappingRuntimeAuthorizationService {
+  private readonly registryValidation: ReturnType<typeof validateCuratedStockMappingRegistry> | undefined;
+
   constructor(
     private readonly repositories: Repositories,
     private readonly registry: CuratedStockMappingRegistry | undefined,
     private readonly clock: () => Date = () => new Date(),
-  ) {}
+  ) {
+    // Registry authority is a composition-time snapshot. Validate its complete
+    // immutable history once, rather than doing graph work on every query.
+    this.registryValidation = registry
+      ? validateCuratedStockMappingRegistry(registry)
+      : undefined;
+  }
 
   async resolve(
     input: SupportedInstrumentIdentity,
@@ -107,10 +115,10 @@ export class CuratedMappingRuntimeAuthorizationService {
         reason: "CURATED_REGISTRY_UNAVAILABLE",
       };
 
-    const validation = validateCuratedStockMappingRegistry(this.registry);
-    if (!validation.ok) {
+    const validation = this.registryValidation;
+    if (!validation || !validation.ok) {
       if (
-        validation.errors.some((error) =>
+        validation?.errors.some((error) =>
           [
             "DUPLICATE_ACTIVE_MAPPING",
             "CONFLICTING_COMPANY_IDENTITY",
