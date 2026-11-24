@@ -28,11 +28,19 @@ function harness(options: { exists?: boolean; filings?: readonly StoredSecFiling
       },
       listFilings: async (input: { companyId: string; limit: number }) => {
         calls.push("filings:" + input.companyId + ":" + input.limit);
-        return options.filings ?? [filing];
+        return (options.filings ?? [filing]).slice(0, input.limit);
       },
-      listFundamentalFacts: async (input: { companyId: string; limit: number }) => {
+      listFundamentalFacts: async (input: { companyId: string; limit: number; taxonomy?: string; tag?: string; fiscalYear?: number; fiscalPeriod?: string; form?: string; reportingStart?: string | null; reportingEnd?: string }) => {
         calls.push("facts:" + input.companyId + ":" + input.limit);
-        return options.facts ?? [fact];
+        return (options.facts ?? [fact]).filter((item) =>
+          (input.taxonomy === undefined || item.taxonomy === input.taxonomy) &&
+          (input.tag === undefined || item.tag === input.tag) &&
+          (input.fiscalYear === undefined || item.fiscalYear === input.fiscalYear) &&
+          (input.fiscalPeriod === undefined || item.fiscalPeriod === input.fiscalPeriod) &&
+          (input.form === undefined || item.form === input.form) &&
+          (input.reportingStart === undefined || item.reportingStart === input.reportingStart) &&
+          (input.reportingEnd === undefined || item.reportingEnd === input.reportingEnd),
+        ).slice(0, input.limit);
       },
     },
   } as unknown as Repositories;
@@ -88,11 +96,86 @@ test("filters stored facts only by supported dimensions and preserves reporting 
     { fiscalYear: 2025.5 },
     { reportingEnd: "31-12-2025" },
     { reportingEnd: "2025-02-29" },
+    { reportingStart: "2025-02-30" },
+    { reportingStart: "2025-01-01", reportingEnd: "2024-12-31" },
     { limit: 0 },
   ]) {
     const invalid = await h.service.getFundamentalFactsByCik("123456", filter);
     assert.equal(invalid.status, "invalid-input");
   }
+});
+
+test("readiness distinguishes unknown company, empty datasets, and missing requested reporting data", async () => {
+  const unknown = harness({ exists: false });
+  assert.deepEqual(await unknown.service.assessFinancialDataReadinessByCik("123456"), {
+    status: "not-found", reason: "COMPANY_NOT_FOUND",
+  });
+
+  const empty = harness({ filings: [], facts: [] });
+  const emptyResult = await empty.service.assessFinancialDataReadinessByCik("123456", {
+    factFilter: { taxonomy: "us-gaap", tag: "Assets", reportingStart: null, reportingEnd: "2025-12-31" },
+  });
+  assert.equal(emptyResult.status, "available");
+  if (emptyResult.status !== "available") return;
+  assert.equal(emptyResult.filings.availability, "empty");
+  assert.equal(emptyResult.fundamentals.availability, "empty");
+  assert.equal(emptyResult.freshness.status, "not-applicable");
+
+  const missing = harness();
+  const missingResult = await missing.service.assessFinancialDataReadinessByCik("123456", {
+    factFilter: { taxonomy: "ifrs-full", tag: "Assets", reportingEnd: "2025-12-31" },
+  });
+  assert.equal(missingResult.status, "available");
+  if (missingResult.status !== "available") return;
+  assert.equal(missingResult.fundamentals.availability, "requested-data-missing");
+  assert.equal(missingResult.fundamentals.request?.reportingEnd, "2025-12-31");
+  assert.equal(missingResult.freshness.status, "unknown");
+  assert.equal(missing.calls.filter((call) => call.startsWith("facts:")).length, 2);
+});
+
+test("readiness reports validated provenance without inventing freshness", async () => {
+  const h = harness({
+    facts: [{ ...fact, value: "900719925474099312345.6789" }],
+  });
+  const result = await h.service.assessFinancialDataReadinessByCik("123456", {
+    factFilter: { taxonomy: "us-gaap", tag: "Assets", reportingStart: null, reportingEnd: "2025-12-31" },
+  });
+  assert.equal(result.status, "available");
+  if (result.status !== "available") return;
+  assert.equal(result.fundamentals.availability, "available");
+  assert.equal(result.fundamentals.provenance, "complete");
+  assert.equal(result.fundamentals.items[0]?.value, "900719925474099312345.6789");
+  assert.equal(result.filings.provenance, "complete");
+  assert.equal(result.freshness.reason, "FRESHNESS_POLICY_NOT_CONFIGURED");
+
+  const incomplete = harness({
+    facts: [{ ...fact, source: { ...fact.source, provider: " " }, fetchedAt: new Date(Number.NaN) }],
+  });
+  const incompleteResult = await incomplete.service.assessFinancialDataReadinessByCik("123456");
+  assert.equal(incompleteResult.status, "available");
+  if (incompleteResult.status === "available")
+    assert.equal(incompleteResult.fundamentals.provenance, "incomplete");
+});
+
+test("readiness rejects invalid filters before company or financial repository reads", async () => {
+  const h = harness();
+  assert.deepEqual(await h.service.assessFinancialDataReadinessByCik("123456", {
+    factFilter: { taxonomy: "us-gaap", reportingEnd: "2025-12-31" },
+  }), { status: "invalid-input", reason: "CONCEPT_REQUIRES_TAXONOMY_AND_TAG" });
+  assert.deepEqual(h.calls, []);
+});
+
+test("instrument readiness remains isolated when authority denies the mapping", async () => {
+  const h = harness({
+    runtimeAuthorizer: {
+      resolve: async () => ({ status: "unauthorized-mapping", reason: "RETIRED_MAPPING" }),
+    },
+  });
+  assert.deepEqual(
+    await h.service.assessFinancialDataReadinessByInstrument({ symbol: "ACME", exchange: "XNAS" }),
+    { status: "unauthorized-mapping", reason: "RETIRED_MAPPING" },
+  );
+  assert.deepEqual(h.calls, []);
 });
 test("rejects every instrument request until curated runtime authority is composed", async () => {
   const h = harness();

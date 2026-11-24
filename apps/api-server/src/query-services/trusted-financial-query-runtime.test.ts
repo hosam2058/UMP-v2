@@ -70,6 +70,24 @@ test("empty, missing, and malformed authority remain distinct and fail closed", 
   assert.equal((await malformed.queries.resolveCompanyByCik("123456")).status, "available");
 });
 
+test("readiness evaluates mapping lifecycle at the supplied effective time", async () => {
+  const calls: string[] = [];
+  const runtime = createTrustedFinancialQueryRuntime({
+    repositories: repositories(calls),
+    registry,
+    clock: () => asOf,
+  });
+  const result = await runtime.queries.assessFinancialDataReadinessByInstrument(
+    { symbol: "ACME", exchange: "XNAS" },
+    { asOf: new Date("2025-12-31T23:59:59.999Z") },
+  );
+  assert.deepEqual(result, {
+    status: "unauthorized-mapping",
+    reason: "FUTURE_EFFECTIVE_MAPPING",
+  });
+  assert.deepEqual(calls, []);
+});
+
 test("invalid query options are rejected before authorization or repository reads", async () => {
   const calls: string[] = [];
   const runtime = createTrustedFinancialQueryRuntime({ repositories: repositories(calls), registry, clock: () => asOf });

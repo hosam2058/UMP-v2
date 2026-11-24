@@ -155,6 +155,7 @@ export interface FundamentalFactQuery {
   fiscalYear?: number;
   fiscalPeriod?: string;
   form?: string;
+  reportingStart?: string | null;
   reportingEnd?: string;
   limit: number;
 }
@@ -510,6 +511,11 @@ export function createRepositories(
             ? undefined
             : eq(fundamentalFacts.fiscalPeriod, input.fiscalPeriod),
           input.form === undefined ? undefined : eq(fundamentalFacts.form, input.form),
+          input.reportingStart === undefined
+            ? undefined
+            : input.reportingStart === null
+              ? isNull(fundamentalFacts.reportingStart)
+              : eq(fundamentalFacts.reportingStart, input.reportingStart),
           input.reportingEnd === undefined
             ? undefined
             : eq(fundamentalFacts.reportingEnd, input.reportingEnd),
