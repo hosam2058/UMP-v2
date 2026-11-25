@@ -1,8 +1,4 @@
-import {
-  createDatabase,
-  createRepositories,
-  type Repositories,
-} from "@ump/db";
+import { createDatabase, createRepositories, type Repositories } from "@ump/db";
 import { requirePersistenceConfig, type UmpConfig } from "../config";
 import { CuratedMappingRuntimeAuthorizationService } from "../identity/curated-mapping-runtime-authorization";
 import { curatedStockMappingRegistry } from "../identity/curated-stock-mapping-registry-data";
@@ -28,7 +24,10 @@ export interface TrustedFinancialQueryRuntimeOptions {
 export function createTrustedFinancialQueryRuntime(
   options: TrustedFinancialQueryRuntimeOptions,
 ): TrustedFinancialQueryRuntime {
-  const source = options.registry === undefined ? curatedStockMappingRegistry : options.registry;
+  const source =
+    options.registry === undefined
+      ? curatedStockMappingRegistry
+      : options.registry;
   // Snapshot mutable caller-owned fixtures/configuration before it becomes authority.
   const registry = source === null ? undefined : structuredClone(source);
   const authorization = new CuratedMappingRuntimeAuthorizationService(
@@ -36,7 +35,10 @@ export function createTrustedFinancialQueryRuntime(
     registry,
     options.clock,
   );
-  const queries = new StoredSecQueryService(options.repositories, authorization);
+  const queries = new StoredSecQueryService(
+    options.repositories,
+    authorization,
+  );
   return Object.freeze({ authorization, queries });
 }
 
@@ -45,16 +47,29 @@ export interface DatabaseBackedTrustedFinancialQueryRuntime extends TrustedFinan
 }
 
 /** Creates and owns a database pool for an explicitly persistence-enabled runtime. */
-export function createDatabaseBackedTrustedFinancialQueryRuntime(
+export async function createDatabaseBackedTrustedFinancialQueryRuntime(
   config: UmpConfig,
-  options: { clock?: () => Date; registry?: CuratedStockMappingRegistry | null } = {},
-): DatabaseBackedTrustedFinancialQueryRuntime {
+  options: {
+    clock?: () => Date;
+    registry?: CuratedStockMappingRegistry | null;
+    databaseFactory?: typeof createDatabase;
+  } = {},
+): Promise<DatabaseBackedTrustedFinancialQueryRuntime> {
   const persistence = requirePersistenceConfig(config);
-  const database = createDatabase({ connectionString: persistence.databaseUrl });
-  const runtime = createTrustedFinancialQueryRuntime({
-    repositories: createRepositories(database.db),
-    ...(options.registry === undefined ? {} : { registry: options.registry }),
-    ...(options.clock === undefined ? {} : { clock: options.clock }),
+  const database = (options.databaseFactory ?? createDatabase)({
+    connectionString: persistence.databaseUrl,
   });
-  return { ...runtime, close: database.close };
+  try {
+    const runtime = createTrustedFinancialQueryRuntime({
+      repositories: createRepositories(database.db),
+      ...(options.registry === undefined ? {} : { registry: options.registry }),
+      ...(options.clock === undefined ? {} : { clock: options.clock }),
+    });
+    return { ...runtime, close: database.close };
+  } catch (error) {
+    // Preserve the construction error while still releasing a pool already
+    // created at this explicit ownership boundary.
+    await database.close().catch(() => undefined);
+    throw error;
+  }
 }

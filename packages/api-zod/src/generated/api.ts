@@ -12,28 +12,43 @@ export const GetInstrumentParams = zod.object({
   "symbol": zod.coerce.string()
 })
 
-export const GetInstrumentResponse = zod.void()
+export const GetInstrument503Response = zod.object({
+  "error": zod.object({
+  "code": zod.enum(['DATA_UNAVAILABLE']),
+  "message": zod.string()
+})
+})
 
 
 export const GetInstrumentFilingsParams = zod.object({
   "symbol": zod.coerce.string()
 })
 
-export const GetInstrumentFilingsResponse = zod.void()
+export const GetInstrumentFilings503Response = zod.object({
+  "error": zod.object({
+  "code": zod.enum(['DATA_UNAVAILABLE']),
+  "message": zod.string()
+})
+})
 
 
 export const GetInstrumentFundamentalsParams = zod.object({
   "symbol": zod.coerce.string()
 })
 
-export const GetInstrumentFundamentalsResponse = zod.void()
+export const GetInstrumentFundamentals503Response = zod.object({
+  "error": zod.object({
+  "code": zod.enum(['DATA_UNAVAILABLE']),
+  "message": zod.string()
+})
+})
 
 
 /**
  * Returns server health status
  * @summary Health check
  */
-export const HealthCheckResponse = zod.object({
+export const HealthCheck200Response = zod.object({
   "status": zod.string()
 })
 

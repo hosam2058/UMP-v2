@@ -31,6 +31,7 @@ export default defineConfig({
       prettier: true,
       override: {
         zod: {
+          generateEachHttpStatus: true,
           coerce: {
             query: ["boolean", "number", "string"],
             param: ["boolean", "number", "string"],

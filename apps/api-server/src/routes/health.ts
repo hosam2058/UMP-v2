@@ -1,10 +1,10 @@
 import { Router, type IRouter } from "express";
-import { HealthCheckResponse } from "@ump/api-zod";
+import { HealthCheck200Response } from "@ump/api-zod";
 
 const router: IRouter = Router();
 
 router.get("/healthz", (_req, res) => {
-  const data = HealthCheckResponse.parse({ status: "ok" });
+  const data = HealthCheck200Response.parse({ status: "ok" });
   res.json(data);
 });
 
